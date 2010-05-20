@@ -18,6 +18,7 @@
 # Transition to new metadata service
 # Check other error status?
 # Parallelize waveform fetching?
+# Restartable?  Check data already downloaded?
 
 use strict;
 use File::Basename;
