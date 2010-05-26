@@ -15,10 +15,13 @@
 # Author: Chad Trabant, IRIS Data Managment Center
 
 # To Do:
-# Transition to new metadata service
-# Check other error status?
-# Parallelize waveform fetching?
-# Restartable?  Check data already downloaded?
+# - Transition to new metadata service
+# - Check other error status?
+# - Parallelize waveform fetching?
+# - Restartable?  Check data already downloaded?
+#
+# - Get RESP for channels
+# - get SAC PZ's for channels
 
 use strict;
 use File::Basename;
