@@ -145,7 +145,7 @@ if ( $verbose > 2 ) {
 
 # An array to hold channel list and metadata
 my @channels = ();
-my %waveform = ();
+my %waveform = (); # 1: request data, 0: No data or error
 
 # Fetch metadata from the station web service
 foreach my $selection ( @selections ) {
@@ -408,11 +408,13 @@ sub GetWaveformData {
 
     if ( $response->code == 404 ) {
       print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n";
+      $waveform{$request} = 0;
     }
     elsif ( ! $response->is_success() ) {
       print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
 	. $response->code . " :: " . status_message($response->code) . "\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+      $waveform{$request} = 0;
     }
     else {
       print STDERR "\n" if ( $verbose );
@@ -430,7 +432,7 @@ sub GetWaveformData {
 #
 # A call back for LWP downloading.
 #
-# Write received data to putput file, tally up the received data size
+# Write received data to output file, tally up the received data size
 # and print and updated (overwriting) byte count string.
 ######################################################################
 sub DLCallBack {
