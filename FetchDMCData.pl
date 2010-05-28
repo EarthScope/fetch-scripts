@@ -12,9 +12,10 @@
 # 2010.140:
 #  - Initial version
 #
-# 2010.147:
+# 2010.148:
 #  - Add options to fetch SAC P&Z and RESP data
 #  - Make waveform collection optional
+#  - Limit metadata channel epochs to be within request window
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -24,18 +25,18 @@
 # - Parallelize waveform fetching?
 # - Restartable?  Check data already downloaded?
 #
-# Multiple epoch collections for SACPZ and RESP overwrite files.
-#
-# Multiple channel epoch collections for data get a copy per epoch.
+# Multiple channel epoch collections for data get a copy per epoch,
+#  this started because metadata epoch times were added to the request hash
 
 use strict;
 use File::Basename;
 use Getopt::Long;
 use LWP::UserAgent;
 use HTTP::Status qw(status_message);
+use Date::Parse;
 use Data::Dumper;
 
-my $version  = "2010.147";
+my $version  = "2010.148";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/mds/';
@@ -48,7 +49,6 @@ my $sacpzservice = 'http://www.iris.edu/ws/sacpz/query';
 
 # Web service for RESP
 my $respservice = 'http://www.iris.edu/ws/resp/query';
-
 
 # HTTP UserAgent reported to web services
 my $useragent = "FetchDMCData/$version";
@@ -167,7 +167,7 @@ if ( $verbose > 2 ) {
 }
 
 # An array to hold channel list and metadata
-my @channels = ();
+my @metadata = ();
 my %request = (); # 1: request data, 0: No data or error
 
 # Fetch metadata from the station web service
@@ -201,15 +201,16 @@ if ( $outfile ) {
 # Collect RESP if output directory specified
 &FetchRESP if ( $respdir );
 
+# Write metadata to file
 if ( $metafile ) {
-  printf STDERR "Writing metadata (%d channel epochs) file\n", scalar @channels if ( $verbose );
+  printf STDERR "Writing metadata (%d channel epochs) file\n", scalar @metadata if ( $verbose );
 
   open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
 
   # Print header line
   print META "#net,sta,loc,chan,scale,lat,lon,elev,depth,azimuth,dip,instrument,start,end\n";
 
-  foreach my $channel ( sort @channels ) {
+  foreach my $channel ( sort @metadata ) {
     my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip) =
       split (/,/, $channel);
 
@@ -479,24 +480,24 @@ sub FetchSACPZ {
     # Skip entries with values not set to 1, perhaps no data was fetched
     next if ( $request{$req} != 1 );
 
-    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend,$metastart,$metaend) = split (/,/, $req);
+    my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend,$mstart,$mend) = split (/,/, $req);
     $count++;
 
     # Generate output file name and open
-    my $sacpzfile = "$sacpzdir/SACPZ.$wnet.$wsta.$wloc.$wchan";
+    my $sacpzfile = "$sacpzdir/SACPZ.$rnet.$rsta.$rloc.$rchan";
     if ( ! open (OUT, ">$sacpzfile") ) {
       print STDERR "Cannot open output file '$sacpzfile': $!\n";
       next;
     }
 
     # Use metadata start and end if not specified
-    $wstart = $metastart if ( ! $wstart );
-    $wend = $metaend if ( ! $wend );
+    $rstart = $mstart if ( ! $rstart );
+    $rend = $mend if ( ! $rend );
 
     # Create web service URI
-    my $uri = "${sacpzservice}?net=$wnet&sta=$wsta&loc=$wloc&cha=$wchan";
-    $uri .= "&starttime=$wstart" if ( $wstart );
-    $uri .= "&endtime=$wend" if ( $wend );
+    my $uri = "${sacpzservice}?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
+    $uri .= "&starttime=$rstart" if ( $rstart );
+    $uri .= "&endtime=$rend" if ( $rend );
 
     print STDERR "SAC-PZ URI: '$uri'\n" if ( $verbose > 1 );
 
@@ -552,24 +553,24 @@ sub FetchRESP {
     # Skip entries with values not set to 1, perhaps no data was fetched
     next if ( $request{$req} != 1 );
 
-    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend,$metastart,$metaend) = split (/,/, $req);
+    my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend,$mstart,$mend) = split (/,/, $req);
     $count++;
 
     # Generate output file name and open
-    my $respfile = "$respdir/RESP.$wnet.$wsta.$wloc.$wchan";
+    my $respfile = "$respdir/RESP.$rnet.$rsta.$rloc.$rchan";
     if ( ! open (OUT, ">$respfile") ) {
       print STDERR "Cannot open output file '$respfile': $!\n";
       next;
     }
 
     # Use metadata start and end if not specified
-    $wstart = $metastart if ( ! $wstart );
-    $wend = $metaend if ( ! $wend );
+    $rstart = $mstart if ( ! $rstart );
+    $rend = $mend if ( ! $rend );
 
     # Create web service URI
-    my $uri = "${respservice}?net=$wnet&sta=$wsta&loc=$wloc&cha=$wchan";
-    $uri .= "&starttime=$wstart" if ( $wstart );
-    $uri .= "&endtime=$wend" if ( $wend );
+    my $uri = "${respservice}?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
+    $uri .= "&starttime=$rstart" if ( $rstart );
+    $uri .= "&endtime=$rend" if ( $rend );
 
     print STDERR "RESP URI: '$uri'\n" if ( $verbose > 1 );
 
@@ -626,7 +627,7 @@ sub DLCallBack {
 #
 # Collect metadata and expand wildcards for selected data set.
 #
-# Resulting metadata is placed in the global @channels array with each
+# Resulting metadata is placed in the global @metadata array with each
 # entry taking the following form:
 #   "net,sta,loc,chan,start,end,lat,lon,elev,depth,azimuth,dip"
 #
@@ -635,17 +636,21 @@ sub DLCallBack {
 #
 ######################################################################
 sub FetchMetaData {
-  my ($mnet,$msta,$mloc,$mchan,$mqual,$mstart,$mend) = @_;
+  my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend) = @_;
+
+  # Convert request start/end times to epoch times
+  my $rstartepoch = str2time ($rstart);
+  my $rendepoch = str2time ($rend);
 
   # Create web service URI
   my $uri = "${metadataservice}?channels=true";
-  $uri .= "&network=$mnet" if ( $mnet );
-  $uri .= "&station=$msta" if ( $msta );
-  $uri .= "&location=$mloc" if ( $mloc );
-  $uri .= "&channel=$mchan" if ( $mchan );
-  if ( $mstart && $mend ) {
-    my ($startdate) = $mstart =~ /^(\d{4,4}-\d{1,2}-\d{1,2}).*$/;
-    my ($enddate) = $mend =~ /^(\d{4,4}-\d{1,2}-\d{1,2}).*$/;
+  $uri .= "&network=$rnet" if ( $rnet );
+  $uri .= "&station=$rsta" if ( $rsta );
+  $uri .= "&location=$rloc" if ( $rloc );
+  $uri .= "&channel=$rchan" if ( $rchan );
+  if ( $rstart && $rend ) {
+    my ($startdate) = $rstart =~ /^(\d{4,4}-\d{1,2}-\d{1,2}).*$/;
+    my ($enddate) = $rend =~ /^(\d{4,4}-\d{1,2}-\d{1,2}).*$/;
     $startdate =~ s/-/\//g;
     $enddate =~ s/-/\//g;
 
@@ -685,6 +690,7 @@ sub FetchMetaData {
   ## Beginning of SAX MDSHandler, event-based streaming XML parsing
   package MDSHandler;
   use base qw(XML::SAX::Base);
+  use Date::Parse;
   use Data::Dumper;
 
   my $inchannel = 0;
@@ -748,22 +754,26 @@ sub FetchMetaData {
     }
 
     if ( $inchannel && $element->{Name} eq "Epoch" ) {
-      $totalepochs++;
+      # Check that Channel Epoch is within request window, allow for open window requests
+      if ( ( ! $rstartepoch || ($rstartepoch <= str2time ($end)) ) &&
+	   ( ! $rendepoch || ($rendepoch >= str2time ($start)) ) )
+	{
+	  $totalepochs++;
 
-      # Translate metadata location ID to "--" if it's spaces
-      my $dloc = ( $loc eq "  " ) ? "--" : $loc;
+	  # Translate metadata location ID to "--" if it's spaces
+	  my $dloc = ( $loc eq "  " ) ? "--" : $loc;
 
-      # Cleanup start and end strings
-      ($start) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
-      ($end) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+	  # Cleanup start and end strings
+	  ($start) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+	  ($end) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
 
-      # Push channel epoch metadata into storage array and chanset hash
-      push (@channels, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip");
-      $request{"$net,$sta,$dloc,$chan,$mqual,$mstart,$mend,$start,$end"} = 1;
+	  # Push channel epoch metadata into storage array and request hash
+	  push (@metadata, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip");
+	  $request{"$net,$sta,$dloc,$chan,$rqual,$rstart,$rend,$start,$end"} = 1;
+	}
 
-      ($start,$end) = (undef) x 2;
-      ($lat,$lon,$elev,$depth ) = (undef) x 4;
-      ($azimuth,$dip) = (undef) x 2;
+      # Reset Epoch level fields
+      ($start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip) = (undef) x 12;
     }
 
     if ( $inchannel && $element->{Name} eq "Azimuth" ) {
