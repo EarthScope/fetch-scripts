@@ -1,13 +1,54 @@
 #!/usr/bin/perl
 #
-# FetchDMCData:
+# FetchDMCData
 #
-# Fetch bulk data from the DMC web interfaces.  Data selection can be
-# specified in terms of network, station, location, channel, start
-# time and end time.
+# Fetch bulk data from the DMC web interfaces.  This program is
+# primarily written to select and fetch waveform data but can also
+# fetch metadata and response information.
 #
-# All received data is written to a single output file.  Optionally
-# the basic metadata can be written to a file as a simple ASCII list.
+# Data selection
+#
+# Data is generally selected by specifying network, station, location,
+# channel, quality, start time and end time.  The name parameters may
+# contain wildcard characters.  All input options are optional but
+# waveform requests should include a time window.  Data may be
+# selected one of three ways:
+#
+# 1) Command line arguments: -N, -S, -L, -C, -Q, -s, -e
+#
+# 2) A selection file containing a list of:
+#    Net Sta Loc Chan Qual Start End
+#
+# 3) A BREQ_FAST formatted file
+#
+# Data output
+#
+# miniSEED: If the -o option is used to specify an output file
+# waveform data will be requested based on the selection and all
+# written to the single file.
+#
+# metadata: If the -m option is used to specifiy a metadata file a
+# line will be written to the file for each channel epoch and will
+# contain:
+# "net,sta,loc,chan,scale,lat,lon,elev,depth,azimuth,dip,instrument,start,end"
+#
+# This metadata file can be used directly with mseed2sac or tracedsp
+# to create SAC files including basic metadata.
+#
+# SAC P&Zs: If the -sd option is given SAC Poles and Zeros will be
+# fetched and a file for each channel will be written to the specified
+# directory with the name 'SACPZ.Net.Sta.Loc.Chan'.  If this option is
+# used while fetching waveform data, only channels which returned
+# waveforms will be requested.
+#
+# RESP: If the -rd option is given SEED RESP (as used by evalresp)
+# will be fetched and a file for each channel will be written to the
+# specified directory with the name 'RESP.Net.Sta.Loc.Chan'.  If this
+# option is used while fetching waveform data, only channels which
+# returned waveforms will be requested.
+#
+#
+# ## Change history ##
 #
 # 2010.140:
 #  - Initial version
@@ -18,12 +59,6 @@
 #  - Limit metadata channel epochs to be within request window
 #
 # Author: Chad Trabant, IRIS Data Managment Center
-
-# To Do:
-# - Transition to new metadata service
-# - Check other error status?
-# - Parallelize waveform fetching?
-# - Restartable?  Check data already downloaded?
 
 use strict;
 use File::Basename;
