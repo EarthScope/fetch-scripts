@@ -23,7 +23,10 @@
 # - Check other error status?
 # - Parallelize waveform fetching?
 # - Restartable?  Check data already downloaded?
-
+#
+# Multiple epoch collections for SACPZ and RESP overwrite files.
+#
+# Multiple channel epoch collections for data get a copy per epoch.
 
 use strict;
 use File::Basename;
@@ -52,7 +55,6 @@ my $useragent = "FetchDMCData/$version";
 
 my $usage     = undef;
 my $verbose   = undef;
-my $pretend   = undef;
 
 my $net        = undef;
 my $sta        = undef;
@@ -69,10 +71,9 @@ my $sacpzdir   = undef;
 my $respdir    = undef;
 
 # Parse command line arguments
-Getopt::Long::Configure("bundling");
+Getopt::Long::Configure ("bundling_override");
 my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
                               'verbose|v+'     => \$verbose,
-                              'pretend|p'      => \$pretend,
                               'net|N=s'        => \$net,
                               'sta|S=s'        => \$sta,
                               'loc|L=s'        => \$loc,
@@ -84,8 +85,8 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
 			      'bfastfile|b=s'  => \$bfastfile,
 			      'metafile|m=s'   => \$metafile,
 			      'outfile|o=s'    => \$outfile,
-			      'sacpzdir|P=s'   => \$sacpzdir,
-			      'respdir|R=s'    => \$respdir,
+			      'sacpzdir|sd=s'  => \$sacpzdir,
+			      'respdir|rd=s'   => \$respdir,
 			    );
 
 my $required =  ( defined $net || defined $sta ||
@@ -99,8 +100,6 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print "Usage: $script [options]\n\n";
   print " Options:\n";
   print " -v                Increase verbosity, may be specified multiple times\n";
-  print " -p                Pretend, do everything but request waveform data\n";
-  print " -V,--vnet         Virtual network, superseded by network selection\n";
   print " -N,--net          Network code, default is all\n";
   print " -S,--sta          Station code, default is all\n";
   print " -L,--loc          Location ID, default is all\n";
@@ -111,6 +110,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
   print " -m metafile       Write basic metadata to specified file\n";
+  print "\n";
   print " -o outfile        Fetch waveform data and write to output file\n";
   print " -P sacpzdir       Fetch SAC P&Zs and write files to sacpzdir\n";
   print " -R respdir        Fetch RESP and write files to respdir\n";
@@ -189,9 +189,11 @@ my $totalbytes = 0;
 my $datasize = 0;
 
 # Fetch waveform data if output file specified
-&FetchWaveformData() if ( $outfile );
+if ( $outfile ) {
+  &FetchWaveformData();
 
-printf STDERR "Received %s of waveform data\n", sizestring($totalbytes);
+  printf STDERR "Received %s of waveform data\n", sizestring($totalbytes);
+}
 
 # Collect SAC P&Zs if output directory specified
 &FetchSACPZ if ( $sacpzdir );
@@ -411,15 +413,17 @@ sub FetchWaveformData {
   my $count = 0;
   my $total = scalar keys %request;
 
+  print STDERR "Fetching waveform data\n" if ( $verbose );
+
   foreach my $req ( sort keys %request ) {
-    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend) = split (/,/, $req);
+    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend,$metastart,$metaend) = split (/,/, $req);
     $count++;
 
     # Create web service URI
     my $uri = "${waveformservice}?net=$wnet&sta=$wsta&loc=$wloc&cha=$wchan";
-    $uri .= "&qual=$wqual" if ( defined $wqual );
-    $uri .= "&starttime=$wstart" if ( defined $wstart );
-    $uri .= "&endtime=$wend" if ( defined $wend );
+    $uri .= "&qual=$wqual" if ( $wqual );
+    $uri .= "&starttime=$wstart" if ( $wstart );
+    $uri .= "&endtime=$wend" if ( $wend );
 
     print STDERR "Waveform URI: '$uri'\n" if ( $verbose > 1 );
 
@@ -469,11 +473,13 @@ sub FetchSACPZ {
   my $total = 0;
   foreach my $req ( keys %request ) { $total++ if ( $request{$req} == 1 ); }
 
+  print STDERR "Fetching SAC Poles and Zeros\n" if ( $verbose );
+
   foreach my $req ( sort keys %request ) {
     # Skip entries with values not set to 1, perhaps no data was fetched
     next if ( $request{$req} != 1 );
 
-    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend) = split (/,/, $req);
+    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend,$metastart,$metaend) = split (/,/, $req);
     $count++;
 
     # Generate output file name and open
@@ -483,10 +489,14 @@ sub FetchSACPZ {
       next;
     }
 
+    # Use metadata start and end if not specified
+    $wstart = $metastart if ( ! $wstart );
+    $wend = $metaend if ( ! $wend );
+
     # Create web service URI
     my $uri = "${sacpzservice}?net=$wnet&sta=$wsta&loc=$wloc&cha=$wchan";
-    $uri .= "&starttime=$wstart" if ( defined $wstart );
-    $uri .= "&endtime=$wend" if ( defined $wend );
+    $uri .= "&starttime=$wstart" if ( $wstart );
+    $uri .= "&endtime=$wend" if ( $wend );
 
     print STDERR "SAC-PZ URI: '$uri'\n" if ( $verbose > 1 );
 
@@ -536,11 +546,13 @@ sub FetchRESP {
   my $total = 0;
   foreach my $req ( keys %request ) { $total++ if ( $request{$req} == 1 ); }
 
+  print STDERR "Fetching RESP\n" if ( $verbose );
+
   foreach my $req ( sort keys %request ) {
     # Skip entries with values not set to 1, perhaps no data was fetched
     next if ( $request{$req} != 1 );
 
-    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend) = split (/,/, $req);
+    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend,$metastart,$metaend) = split (/,/, $req);
     $count++;
 
     # Generate output file name and open
@@ -550,10 +562,14 @@ sub FetchRESP {
       next;
     }
 
+    # Use metadata start and end if not specified
+    $wstart = $metastart if ( ! $wstart );
+    $wend = $metaend if ( ! $wend );
+
     # Create web service URI
     my $uri = "${respservice}?net=$wnet&sta=$wsta&loc=$wloc&cha=$wchan";
-    $uri .= "&starttime=$wstart" if ( defined $wstart );
-    $uri .= "&endtime=$wend" if ( defined $wend );
+    $uri .= "&starttime=$wstart" if ( $wstart );
+    $uri .= "&endtime=$wend" if ( $wend );
 
     print STDERR "RESP URI: '$uri'\n" if ( $verbose > 1 );
 
@@ -737,9 +753,13 @@ sub FetchMetaData {
       # Translate metadata location ID to "--" if it's spaces
       my $dloc = ( $loc eq "  " ) ? "--" : $loc;
 
+      # Cleanup start and end strings
+      ($start) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      ($end) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+
       # Push channel epoch metadata into storage array and chanset hash
       push (@channels, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip");
-      $request{"$net,$sta,$dloc,$chan,$mqual,$mstart,$mend"} = 1;
+      $request{"$net,$sta,$dloc,$chan,$mqual,$mstart,$mend,$start,$end"} = 1;
 
       ($start,$end) = (undef) x 2;
       ($lat,$lon,$elev,$depth ) = (undef) x 4;
