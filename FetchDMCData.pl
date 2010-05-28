@@ -57,6 +57,7 @@
 #  - Add options to fetch SAC P&Z and RESP data
 #  - Make waveform collection optional
 #  - Limit metadata channel epochs to be within request window
+#  - Print "DONE" when finished
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -251,6 +252,8 @@ if ( $metafile ) {
 
   close META;
 }
+
+print "DONE\n";
 ## End of main
 
 
@@ -588,8 +591,11 @@ sub FetchRESP {
     my ($mstart,$mend) = split (/\|/, $request{$req});
     $count++;
 
+    # Translate metadata location ID from "--" to blank
+    my $ploc = ( $loc eq "--" ) ? "" : $loc;
+
     # Generate output file name and open
-    my $respfile = "$respdir/RESP.$rnet.$rsta.$rloc.$rchan";
+    my $respfile = "$respdir/RESP.$rnet.$rsta.$ploc.$rchan";
     if ( ! open (OUT, ">$respfile") ) {
       print STDERR "Cannot open output file '$respfile': $!\n";
       next;
