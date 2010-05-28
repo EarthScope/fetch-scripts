@@ -50,8 +50,8 @@ my $respservice = 'http://www.iris.edu/ws/resp/query';
 # HTTP UserAgent reported to web services
 my $useragent = "FetchDMCData/$version";
 
-my $usage     = undef;
-my $verbose   = undef;
+my $usage      = undef;
+my $verbose    = undef;
 
 my $net        = undef;
 my $sta        = undef;
@@ -109,8 +109,8 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -m metafile       Write basic metadata to specified file\n";
   print "\n";
   print " -o outfile        Fetch waveform data and write to output file\n";
-  print " -P sacpzdir       Fetch SAC P&Zs and write files to sacpzdir\n";
-  print " -R respdir        Fetch RESP and write files to respdir\n";
+  print " -sd sacpzdir      Fetch SAC P&Zs and write files to sacpzdir\n";
+  print " -rd respdir       Fetch RESP and write files to respdir\n";
   print "\n";
   exit 1;
 }
@@ -414,7 +414,7 @@ sub FetchWaveformData {
   print STDERR "Fetching waveform data\n" if ( $verbose );
 
   foreach my $req ( sort keys %request ) {
-    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend) = split (/|/, $req);
+    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend) = split (/\|/, $req);
     $count++;
 
     # Create web service URI
@@ -477,8 +477,8 @@ sub FetchSACPZ {
     # Skip entries with values not set to 1, perhaps no data was fetched
     next if ( ! defined $request{$req} );
 
-    my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend) = split (/|/, $req);
-    my ($mstart,$mend) = split (/|/, $request{$req});
+    my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend) = split (/\|/, $req);
+    my ($mstart,$mend) = split (/\|/, $request{$req});
     $count++;
 
     # Generate output file name and open
@@ -549,8 +549,8 @@ sub FetchRESP {
     # Skip entries with values not set to 1, perhaps no data was fetched
     next if ( ! defined $request{$req} );
 
-    my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend) = split (/|/, $req);
-    my ($mstart,$mend) = split (/|/, $request{$req});
+    my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend) = split (/\|/, $req);
+    my ($mstart,$mend) = split (/\|/, $request{$req});
     $count++;
 
     # Generate output file name and open
@@ -775,8 +775,9 @@ sub FetchMetaData {
 	    $request{"$net|$sta|$dloc|$chan|$rqual|$rstart|$rend"} = "$start|$end";
 	  }
 	  else {
-	    my ($vstart,$vend) = split (/|/, $request{"$net|$sta|$dloc|$chan|$rqual|$rstart|$rend"});
-	    $vstart = $start if ( $startepoch > str2time ($vstart) );
+	    # Track widest metadata start and end range
+	    my ($vstart,$vend) = split (/\|/, $request{"$net|$sta|$dloc|$chan|$rqual|$rstart|$rend"});
+	    $vstart = $start if ( $startepoch < str2time ($vstart) );
 	    $vend = $end if ( $endepoch > str2time ($vend) );
 	    $request{"$net|$sta|$dloc|$chan|$rqual|$rstart|$rend"} = "$vstart|$vend";
 	  }
