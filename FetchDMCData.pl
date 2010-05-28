@@ -12,6 +12,10 @@
 # 2010.140:
 #  - Initial version
 #
+# 2010.147:
+#  - Add options to fetch SAC P&Z and RESP data
+#  - Make waveform collection optional
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 # To Do:
@@ -19,9 +23,7 @@
 # - Check other error status?
 # - Parallelize waveform fetching?
 # - Restartable?  Check data already downloaded?
-#
-# - Get RESP for channels
-# - get SAC PZ's for channels
+
 
 use strict;
 use File::Basename;
@@ -30,13 +32,20 @@ use LWP::UserAgent;
 use HTTP::Status qw(status_message);
 use Data::Dumper;
 
-my $version  = "2010.140";
+my $version  = "2010.147";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/mds/';
 
 # Web service for waveform data
 my $waveformservice = 'http://www.iris.edu/ws/dataselect/query';
+
+# Web service for SAC P&Z
+my $sacpzservice = 'http://www.iris.edu/ws/sacpz/query';
+
+# Web service for RESP
+my $respservice = 'http://www.iris.edu/ws/resp/query';
+
 
 # HTTP UserAgent reported to web services
 my $useragent = "FetchDMCData/$version";
@@ -56,6 +65,8 @@ my $selectfile = undef;
 my $bfastfile  = undef;
 my $metafile   = undef;
 my $outfile    = undef;
+my $sacpzdir   = undef;
+my $respdir    = undef;
 
 # Parse command line arguments
 Getopt::Long::Configure("bundling");
@@ -73,6 +84,8 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
 			      'bfastfile|b=s'  => \$bfastfile,
 			      'metafile|m=s'   => \$metafile,
 			      'outfile|o=s'    => \$outfile,
+			      'sacpzdir|P=s'   => \$sacpzdir,
+			      'respdir|R=s'    => \$respdir,
 			    );
 
 my $required =  ( defined $net || defined $sta ||
@@ -80,7 +93,7 @@ my $required =  ( defined $net || defined $sta ||
 		  defined $starttime || defined $endtime ||
 		  defined $selectfile || defined $bfastfile );
 
-if ( ! $getoptsret || $usage || ! $outfile || ! $required ) {
+if ( ! $getoptsret || $usage || ! $required ) {
   my $script = basename($0);
   print "$script: collect waveform data from the IRIS DMC (version $version)\n\n";
   print "Usage: $script [options]\n\n";
@@ -98,9 +111,19 @@ if ( ! $getoptsret || $usage || ! $outfile || ! $required ) {
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
   print " -m metafile       Write basic metadata to specified file\n";
-  print " -o outfile        Specify output file, required\n";
+  print " -o outfile        Fetch waveform data and write to output file\n";
+  print " -P sacpzdir       Fetch SAC P&Zs and write files to sacpzdir\n";
+  print " -R respdir        Fetch RESP and write files to respdir\n";
   print "\n";
   exit 1;
+}
+
+# Check for existence of output directories
+if ( $sacpzdir && ! -d "$sacpzdir" ) {
+  die "Cannot find SAC P&Zs output directory: $sacpzdir\n";
+}
+if ( $respdir && ! -d "$respdir" ) {
+  die "Cannot find RESP output directory: $respdir\n";
 }
 
 # Normalize time strings
@@ -145,18 +168,18 @@ if ( $verbose > 2 ) {
 
 # An array to hold channel list and metadata
 my @channels = ();
-my %waveform = (); # 1: request data, 0: No data or error
+my %request = (); # 1: request data, 0: No data or error
 
 # Fetch metadata from the station web service
 foreach my $selection ( @selections ) {
   my ($snet,$ssta,$sloc,$schan,$squal,$sstart,$send) = split (/,/,$selection);
-  &GetMetaData($snet,$ssta,$sloc,$schan,$squal,$sstart,$send);
+  &FetchMetaData($snet,$ssta,$sloc,$schan,$squal,$sstart,$send);
 }
 
 # Report complete data requests
 if ( $verbose > 2 ) {
-  print STDERR "== Data requests ==\n";
-  foreach my $req ( sort keys %waveform ) {
+  print STDERR "== Request list ==\n";
+  foreach my $req ( sort keys %request ) {
     print STDERR "    $req\n";
   }
 }
@@ -165,21 +188,19 @@ if ( $verbose > 2 ) {
 my $totalbytes = 0;
 my $datasize = 0;
 
-# Collect waveform data if not pretending
-if ( ! $pretend ) {
-  # Open output file
-  open (OUT, ">$outfile") || die "Cannot open output file '$outfile': $!\n";
-
-  # Fetch waveform data from the waveform web service
-  &GetWaveformData();
-
-  close OUT;
-}
+# Fetch waveform data if output file specified
+&FetchWaveformData() if ( $outfile );
 
 printf STDERR "Received %s of waveform data\n", sizestring($totalbytes);
 
+# Collect SAC P&Zs if output directory specified
+&FetchSACPZ if ( $sacpzdir );
+
+# Collect RESP if output directory specified
+&FetchRESP if ( $respdir );
+
 if ( $metafile ) {
-  print STDERR "Writing metadata file\n" if ( $verbose );
+  printf STDERR "Writing metadata (%d channel epochs) file\n", scalar @channels if ( $verbose );
 
   open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
 
@@ -373,22 +394,25 @@ sub ReadBFastFile {
 
 
 ######################################################################
-# GetWaveformData:
+# FetchWaveformData:
 #
-# Collect waveform data for each entry in the %waveform hash.  All
+# Collect waveform data for each entry in the %request hash.  All
 # returned data is written to the global output file handle.
 #
 ######################################################################
-sub GetWaveformData {
+sub FetchWaveformData {
+  # Open output file
+  open (OUT, ">$outfile") || die "Cannot open output file '$outfile': $!\n";
+
   # Create HTTP user agent
   my $ua = LWP::UserAgent->new();
   $ua->agent ($useragent);
 
   my $count = 0;
-  my $total = scalar keys %waveform;
+  my $total = scalar keys %request;
 
-  foreach my $request ( sort keys %waveform ) {
-    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend) = split (/,/, $request);
+  foreach my $req ( sort keys %request ) {
+    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend) = split (/,/, $req);
     $count++;
 
     # Create web service URI
@@ -408,13 +432,13 @@ sub GetWaveformData {
 
     if ( $response->code == 404 ) {
       print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n";
-      $waveform{$request} = 0;
+      $request{$req} = 0;
     }
     elsif ( ! $response->is_success() ) {
       print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
 	. $response->code . " :: " . status_message($response->code) . "\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
-      $waveform{$request} = 0;
+      $request{$req} = 0;
     }
     else {
       print STDERR "\n" if ( $verbose );
@@ -424,7 +448,142 @@ sub GetWaveformData {
     $totalbytes += $datasize;
   }
 
-} # End of GetWaveformData
+  close OUT;
+} # End of FetchWaveformData
+
+
+######################################################################
+# FetchSACPZ:
+#
+# Fetch SAC Poles and Zeros for each entry in the %request hash with
+# a value of 1.  The result for each channel is written to a separate
+# file in the specified directory.
+#
+######################################################################
+sub FetchSACPZ {
+  # Create HTTP user agent
+  my $ua = LWP::UserAgent->new();
+  $ua->agent ($useragent);
+
+  my $count = 0;
+  my $total = 0;
+  foreach my $req ( keys %request ) { $total++ if ( $request{$req} == 1 ); }
+
+  foreach my $req ( sort keys %request ) {
+    # Skip entries with values not set to 1, perhaps no data was fetched
+    next if ( $request{$req} != 1 );
+
+    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend) = split (/,/, $req);
+    $count++;
+
+    # Generate output file name and open
+    my $sacpzfile = "$sacpzdir/SACPZ.$wnet.$wsta.$wloc.$wchan";
+    if ( ! open (OUT, ">$sacpzfile") ) {
+      print STDERR "Cannot open output file '$sacpzfile': $!\n";
+      next;
+    }
+
+    # Create web service URI
+    my $uri = "${sacpzservice}?net=$wnet&sta=$wsta&loc=$wloc&cha=$wchan";
+    $uri .= "&starttime=$wstart" if ( defined $wstart );
+    $uri .= "&endtime=$wend" if ( defined $wend );
+
+    print STDERR "SAC-PZ URI: '$uri'\n" if ( $verbose > 1 );
+
+    print STDERR "Downloading $sacpzfile ($count/$total) :: Received " if ( $verbose );
+
+    $datasize = 0;
+
+    # Fetch waveform data from web service using callback routine
+    my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
+
+    if ( $response->code == 404 ) {
+      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n";
+      $request{$req} = 0;
+    }
+    elsif ( ! $response->is_success() ) {
+      print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
+	. $response->code . " :: " . status_message($response->code) . "\n";
+      print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+      $request{$req} = 0;
+    }
+    else {
+      print STDERR "\n" if ( $verbose );
+    }
+
+    close OUT;
+
+    # Remove file if no data was fetched
+    unlink $sacpzfile if ( $datasize == 0 );
+  }
+} # End of FetchSACPZ
+
+
+######################################################################
+# FetchRESP:
+#
+# Fetch SEED RESP for each entry in the %request hash with a value of
+# 1.  The result for each channel is written to a separate file in the
+# specified directory.
+#
+######################################################################
+sub FetchRESP {
+  # Create HTTP user agent
+  my $ua = LWP::UserAgent->new();
+  $ua->agent ($useragent);
+
+  my $count = 0;
+  my $total = 0;
+  foreach my $req ( keys %request ) { $total++ if ( $request{$req} == 1 ); }
+
+  foreach my $req ( sort keys %request ) {
+    # Skip entries with values not set to 1, perhaps no data was fetched
+    next if ( $request{$req} != 1 );
+
+    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend) = split (/,/, $req);
+    $count++;
+
+    # Generate output file name and open
+    my $respfile = "$respdir/RESP.$wnet.$wsta.$wloc.$wchan";
+    if ( ! open (OUT, ">$respfile") ) {
+      print STDERR "Cannot open output file '$respfile': $!\n";
+      next;
+    }
+
+    # Create web service URI
+    my $uri = "${respservice}?net=$wnet&sta=$wsta&loc=$wloc&cha=$wchan";
+    $uri .= "&starttime=$wstart" if ( defined $wstart );
+    $uri .= "&endtime=$wend" if ( defined $wend );
+
+    print STDERR "RESP URI: '$uri'\n" if ( $verbose > 1 );
+
+    print STDERR "Downloading $respfile ($count/$total) :: Received " if ( $verbose );
+
+    $datasize = 0;
+
+    # Fetch waveform data from web service using callback routine
+    my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
+
+    if ( $response->code == 404 ) {
+      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n";
+      $request{$req} = 0;
+    }
+    elsif ( ! $response->is_success() ) {
+      print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
+	. $response->code . " :: " . status_message($response->code) . "\n";
+      print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+      $request{$req} = 0;
+    }
+    else {
+      print STDERR "\n" if ( $verbose );
+    }
+
+    close OUT;
+
+    # Remove file if no data was fetched
+    unlink $respfile if ( $datasize == 0 );
+  }
+} # End of FetchRESP
 
 
 ######################################################################
@@ -447,7 +606,7 @@ sub DLCallBack {
 
 
 ######################################################################
-# GetMetaData:
+# FetchMetaData:
 #
 # Collect metadata and expand wildcards for selected data set.
 #
@@ -456,10 +615,10 @@ sub DLCallBack {
 #   "net,sta,loc,chan,start,end,lat,lon,elev,depth,azimuth,dip"
 #
 # In addition, an entry for the unique NSLCQ time-window is added to
-# the %waveform hash, which is used to request waveform data.
+# the %request hash, used later to request data.
 #
 ######################################################################
-sub GetMetaData {
+sub FetchMetaData {
   my ($mnet,$msta,$mloc,$mchan,$mqual,$mstart,$mend) = @_;
 
   # Create web service URI
@@ -580,7 +739,7 @@ sub GetMetaData {
 
       # Push channel epoch metadata into storage array and chanset hash
       push (@channels, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip");
-      $waveform{"$net,$sta,$dloc,$chan,$mqual,$mstart,$mend"} = 1;
+      $request{"$net,$sta,$dloc,$chan,$mqual,$mstart,$mend"} = 1;
 
       ($start,$end) = (undef) x 2;
       ($lat,$lon,$elev,$depth ) = (undef) x 4;
@@ -607,7 +766,7 @@ sub GetMetaData {
       $dip = $element->{Data};
     }
   }
-} # End of GetMetaData()
+} # End of FetchMetaData()
 
 
 ######################################################################
