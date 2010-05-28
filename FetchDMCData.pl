@@ -66,7 +66,7 @@ use File::Basename;
 use Getopt::Long;
 use LWP::UserAgent;
 use HTTP::Status qw(status_message);
-use Date::Parse;
+use HTTP::Date;
 use Data::Dumper;
 
 my $version  = "2010.148";
@@ -728,7 +728,7 @@ sub FetchMetaData {
   ## Beginning of SAX MDSHandler, event-based streaming XML parsing
   package MDSHandler;
   use base qw(XML::SAX::Base);
-  use Date::Parse;
+  use HTTP::Date;
   use Data::Dumper;
 
   my $inchannel = 0;
@@ -796,7 +796,7 @@ sub FetchMetaData {
       my $endepoch = str2time ($end);
 
       # Check that Channel Epoch is within request window, allow for open window requests
-      if ( ( ! $rstartepoch || ($rstartepoch <= $endepoch) ) &&
+      if ( ( ! $rstartepoch || ! $endepoch || ($rstartepoch <= $endepoch) ) &&
 	   ( ! $rendepoch || ($rendepoch >= $startepoch) ) )
 	{
 	  $totalepochs++;
