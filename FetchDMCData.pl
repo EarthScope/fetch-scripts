@@ -24,9 +24,6 @@
 # - Check other error status?
 # - Parallelize waveform fetching?
 # - Restartable?  Check data already downloaded?
-#
-# Multiple channel epoch collections for data get a copy per epoch,
-#  this started because metadata epoch times were added to the request hash
 
 use strict;
 use File::Basename;
@@ -168,7 +165,7 @@ if ( $verbose > 2 ) {
 
 # An array to hold channel list and metadata
 my @metadata = ();
-my %request = (); # 1: request data, 0: No data or error
+my %request = (); # Value is metadata range for selection
 
 # Fetch metadata from the station web service
 foreach my $selection ( @selections ) {
@@ -180,7 +177,7 @@ foreach my $selection ( @selections ) {
 if ( $verbose > 2 ) {
   print STDERR "== Request list ==\n";
   foreach my $req ( sort keys %request ) {
-    print STDERR "    $req\n";
+    print STDERR "    $req (metadata: $request{$req})\n";
   }
 }
 
@@ -417,7 +414,7 @@ sub FetchWaveformData {
   print STDERR "Fetching waveform data\n" if ( $verbose );
 
   foreach my $req ( sort keys %request ) {
-    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend,$metastart,$metaend) = split (/,/, $req);
+    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend) = split (/|/, $req);
     $count++;
 
     # Create web service URI
@@ -437,13 +434,13 @@ sub FetchWaveformData {
 
     if ( $response->code == 404 ) {
       print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n";
-      $request{$req} = 0;
+      $request{$req} = undef;
     }
     elsif ( ! $response->is_success() ) {
       print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
 	. $response->code . " :: " . status_message($response->code) . "\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
-      $request{$req} = 0;
+      $request{$req} = undef;
     }
     else {
       print STDERR "\n" if ( $verbose );
@@ -460,8 +457,8 @@ sub FetchWaveformData {
 ######################################################################
 # FetchSACPZ:
 #
-# Fetch SAC Poles and Zeros for each entry in the %request hash with
-# a value of 1.  The result for each channel is written to a separate
+# Fetch SAC Poles and Zeros for each entry in the %request hash with a
+# defined value.  The result for each channel is written to a separate
 # file in the specified directory.
 #
 ######################################################################
@@ -472,15 +469,16 @@ sub FetchSACPZ {
 
   my $count = 0;
   my $total = 0;
-  foreach my $req ( keys %request ) { $total++ if ( $request{$req} == 1 ); }
+  foreach my $req ( keys %request ) { $total++ if ( defined $request{$req} ); }
 
   print STDERR "Fetching SAC Poles and Zeros\n" if ( $verbose );
 
   foreach my $req ( sort keys %request ) {
     # Skip entries with values not set to 1, perhaps no data was fetched
-    next if ( $request{$req} != 1 );
+    next if ( ! defined $request{$req} );
 
-    my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend,$mstart,$mend) = split (/,/, $req);
+    my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend) = split (/|/, $req);
+    my ($mstart,$mend) = split (/|/, $request{$req});
     $count++;
 
     # Generate output file name and open
@@ -510,13 +508,11 @@ sub FetchSACPZ {
 
     if ( $response->code == 404 ) {
       print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n";
-      $request{$req} = 0;
     }
     elsif ( ! $response->is_success() ) {
       print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
 	. $response->code . " :: " . status_message($response->code) . "\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
-      $request{$req} = 0;
     }
     else {
       print STDERR "\n" if ( $verbose );
@@ -545,15 +541,16 @@ sub FetchRESP {
 
   my $count = 0;
   my $total = 0;
-  foreach my $req ( keys %request ) { $total++ if ( $request{$req} == 1 ); }
+  foreach my $req ( keys %request ) { $total++ if ( defined $request{$req} ); }
 
   print STDERR "Fetching RESP\n" if ( $verbose );
 
   foreach my $req ( sort keys %request ) {
     # Skip entries with values not set to 1, perhaps no data was fetched
-    next if ( $request{$req} != 1 );
+    next if ( ! defined $request{$req} );
 
-    my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend,$mstart,$mend) = split (/,/, $req);
+    my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend) = split (/|/, $req);
+    my ($mstart,$mend) = split (/|/, $request{$req});
     $count++;
 
     # Generate output file name and open
@@ -583,13 +580,11 @@ sub FetchRESP {
 
     if ( $response->code == 404 ) {
       print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n";
-      $request{$req} = 0;
     }
     elsif ( ! $response->is_success() ) {
       print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
 	. $response->code . " :: " . status_message($response->code) . "\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
-      $request{$req} = 0;
     }
     else {
       print STDERR "\n" if ( $verbose );
@@ -632,7 +627,9 @@ sub DLCallBack {
 #   "net,sta,loc,chan,start,end,lat,lon,elev,depth,azimuth,dip"
 #
 # In addition, an entry for the unique NSLCQ time-window is added to
-# the %request hash, used later to request data.
+# the %request hash, used later to request data.  The value of the
+# request hash entries is maintained to be the range of Channel epochs
+# that match the time selection.
 #
 ######################################################################
 sub FetchMetaData {
@@ -754,9 +751,12 @@ sub FetchMetaData {
     }
 
     if ( $inchannel && $element->{Name} eq "Epoch" ) {
+      my $startepoch = str2time ($start);
+      my $endepoch = str2time ($end);
+
       # Check that Channel Epoch is within request window, allow for open window requests
-      if ( ( ! $rstartepoch || ($rstartepoch <= str2time ($end)) ) &&
-	   ( ! $rendepoch || ($rendepoch >= str2time ($start)) ) )
+      if ( ( ! $rstartepoch || ($rstartepoch <= $endepoch) ) &&
+	   ( ! $rendepoch || ($rendepoch >= $startepoch) ) )
 	{
 	  $totalepochs++;
 
@@ -767,9 +767,19 @@ sub FetchMetaData {
 	  ($start) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
 	  ($end) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
 
-	  # Push channel epoch metadata into storage array and request hash
+	  # Push channel epoch metadata into storage array
 	  push (@metadata, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip");
-	  $request{"$net,$sta,$dloc,$chan,$rqual,$rstart,$rend,$start,$end"} = 1;
+
+	  # Put entry into request hash, value is the widest range of channel epochs
+	  if ( ! exists  $request{"$net|$sta|$dloc|$chan|$rqual|$rstart|$rend"} ) {
+	    $request{"$net|$sta|$dloc|$chan|$rqual|$rstart|$rend"} = "$start|$end";
+	  }
+	  else {
+	    my ($vstart,$vend) = split (/|/, $request{"$net|$sta|$dloc|$chan|$rqual|$rstart|$rend"});
+	    $vstart = $start if ( $startepoch > str2time ($vstart) );
+	    $vend = $end if ( $endepoch > str2time ($vend) );
+	    $request{"$net|$sta|$dloc|$chan|$rqual|$rstart|$rend"} = "$vstart|$vend";
+	  }
 	}
 
       # Reset Epoch level fields
