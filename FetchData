@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# FetchDMCData
+# FetchData
 #
 # Fetch bulk data from the DMC web interfaces.  This program is
 # primarily written to select and fetch waveform data but can also
@@ -87,7 +87,7 @@ my $sacpzservice = 'http://www.iris.edu/ws/sacpz/query';
 my $respservice = 'http://www.iris.edu/ws/resp/query';
 
 # HTTP UserAgent reported to web services
-my $useragent = "FetchDMCData/$version";
+my $useragent = "FetchData/$version";
 
 my $usage      = undef;
 my $verbose    = undef;
