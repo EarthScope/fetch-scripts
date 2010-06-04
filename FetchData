@@ -148,7 +148,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -e endtime        Specify end time (YYYY/MM/DD HH:MM:SS)\n";
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
-  print " -a user:pass      User and pass when authentication is needed\n";
+  print " -a user:pass      User and password when authentication is needed\n";
   print "\n";
   print " -o outfile        Fetch waveform data and write to output file\n";
   print " -sd sacpzdir      Fetch SAC P&Zs and write files to sacpzdir\n";
