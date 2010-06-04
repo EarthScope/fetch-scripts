@@ -69,7 +69,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Data::Dumper;
 
-my $version  = "2010.148";
+my $version  = "2010.154";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/mds/';
@@ -98,10 +98,11 @@ my $starttime  = undef;
 my $endtime    = undef;
 my $selectfile = undef;
 my $bfastfile  = undef;
-my $metafile   = undef;
+my $auth       = undef;
 my $outfile    = undef;
 my $sacpzdir   = undef;
 my $respdir    = undef;
+my $metafile   = undef;
 
 # Parse command line arguments
 Getopt::Long::Configure ("bundling_override");
@@ -116,10 +117,11 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
 			      'endtime|e=s'    => \$endtime,
 			      'selectfile|l=s' => \$selectfile,
 			      'bfastfile|b=s'  => \$bfastfile,
-			      'metafile|m=s'   => \$metafile,
+			      'auth|a=s'       => \$auth,
 			      'outfile|o=s'    => \$outfile,
 			      'sacpzdir|sd=s'  => \$sacpzdir,
 			      'respdir|rd=s'   => \$respdir,
+			      'metafile|m=s'   => \$metafile,
 			    );
 
 my $required =  ( defined $net || defined $sta ||
@@ -142,11 +144,12 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -e endtime        Specify end time (YYYY/MM/DD HH:MM:SS)\n";
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
-  print " -m metafile       Write basic metadata to specified file\n";
+  print " -a user/pass      User and pass when authentication is needed\n";
   print "\n";
   print " -o outfile        Fetch waveform data and write to output file\n";
   print " -sd sacpzdir      Fetch SAC P&Zs and write files to sacpzdir\n";
   print " -rd respdir       Fetch RESP and write files to respdir\n";
+  print " -m metafile       Write basic metadata to specified file\n";
   print "\n";
   exit 1;
 }
@@ -169,6 +172,11 @@ if ( $endtime ) {
   my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $endtime);
   $endtime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
 }
+
+# Split authentication credentials into user and password
+my ($user,$pass) = split(/\//, $auth);
+
+CHAD, need to use credentials
 
 # An array to hold data selections
 my @selections = ();
