@@ -59,6 +59,9 @@
 #  - Limit metadata channel epochs to be within request window
 #  - Print "DONE" when finished
 #
+# 2010.154:
+#  - Add -a option to specify authorization credentials
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -104,6 +107,7 @@ my $sacpzdir   = undef;
 my $respdir    = undef;
 my $metafile   = undef;
 
+
 # Parse command line arguments
 Getopt::Long::Configure ("bundling_override");
 my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
@@ -144,7 +148,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -e endtime        Specify end time (YYYY/MM/DD HH:MM:SS)\n";
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
-  print " -a user/pass      User and pass when authentication is needed\n";
+  print " -a user:pass      User and pass when authentication is needed\n";
   print "\n";
   print " -o outfile        Fetch waveform data and write to output file\n";
   print " -sd sacpzdir      Fetch SAC P&Zs and write files to sacpzdir\n";
@@ -173,10 +177,51 @@ if ( $endtime ) {
   $endtime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
 }
 
-# Split authentication credentials into user and password
-my ($user,$pass) = split(/\//, $auth);
+######################################################################
+#
+# Package RequestAgent: a superclass for LWP::UserAgent with override
+# of LWP::UserAgent methods to set default user agent and handle
+# authentication credentials.
+#
+######################################################################
+{
+  package RequestAgent;
+  our @ISA = qw(LWP::UserAgent);
 
-CHAD, need to use credentials
+  sub new
+    {
+      my $self = LWP::UserAgent::new(@_);
+      $self->agent($useragent);
+      $self;
+    }
+
+  sub get_basic_credentials
+    {
+      my ($self, $realm, $uri) = @_;
+
+      if ( defined $auth ) {
+	return split(':', $auth, 2);
+      }
+      elsif (-t) {
+	my $netloc = $uri->host_port;
+	print "\n";
+	print "Enter username for $realm at $netloc: ";
+	my $user = <STDIN>;
+	chomp($user);
+	return (undef, undef) unless length $user;
+	print "Password: ";
+	system("stty -echo");
+	my $password = <STDIN>;
+	system("stty echo");
+	print "\n";  # because we disabled echo
+	chomp($password);
+	return ($user, $password);
+      }
+      else {
+	return (undef, undef)
+      }
+    }
+} # End of LWP::UserAgent override
 
 # An array to hold data selections
 my @selections = ();
@@ -451,8 +496,7 @@ sub FetchWaveformData {
   open (OUT, ">$outfile") || die "Cannot open output file '$outfile': $!\n";
 
   # Create HTTP user agent
-  my $ua = LWP::UserAgent->new();
-  $ua->agent ($useragent);
+  my $ua = RequestAgent->new();
 
   my $count = 0;
   my $total = scalar keys %request;
@@ -497,6 +541,9 @@ sub FetchWaveformData {
   }
 
   close OUT;
+
+  # Remove empty file
+  unlink $outfile if ( -z $outfile );
 } # End of FetchWaveformData
 
 
@@ -510,8 +557,7 @@ sub FetchWaveformData {
 ######################################################################
 sub FetchSACPZ {
   # Create HTTP user agent
-  my $ua = LWP::UserAgent->new();
-  $ua->agent ($useragent);
+  my $ua = RequestAgent->new();
 
   my $count = 0;
   my $total = 0;
@@ -582,8 +628,7 @@ sub FetchSACPZ {
 ######################################################################
 sub FetchRESP {
   # Create HTTP user agent
-  my $ua = LWP::UserAgent->new();
-  $ua->agent ($useragent);
+  my $ua = RequestAgent->new();
 
   my $count = 0;
   my $total = 0;
@@ -684,6 +729,9 @@ sub DLCallBack {
 sub FetchMetaData {
   my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend) = @_;
 
+  # Create HTTP user agent
+  my $ua = RequestAgent->new();
+
   # Convert request start/end times to epoch times
   my $rstartepoch = str2time ($rstart);
   my $rendepoch = str2time ($rend);
@@ -706,10 +754,6 @@ sub FetchMetaData {
   print STDERR "Metadata URI: '$uri'\n" if ( $verbose > 1 );
 
   print STDERR "Fetching metadata... " if ( $verbose );
-
-  # Create HTTP user agent
-  my $ua = LWP::UserAgent->new();
-  $ua->agent ($useragent);
 
   # Fetch metadata from web service
   my $response = $ua->get($uri);
