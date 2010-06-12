@@ -6,6 +6,9 @@
 # primarily written to select and fetch waveform data but can also
 # fetch metadata and response information.
 #
+# Installation of the XML::SAX::ExpatXS module will significantly
+# speed up the parsing of metadata results returned as XML.
+#
 # Data selection
 #
 # Data is generally selected by specifying network, station, location,
@@ -62,6 +65,9 @@
 # 2010.154:
 #  - Add -a option to specify authorization credentials
 #
+# 2010.163:
+#  - Add download handler for XML metadata for improved feedback
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -72,7 +78,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Data::Dumper;
 
-my $version  = "2010.154";
+my $version  = "2010.163";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/mds/';
@@ -253,8 +259,9 @@ if ( $verbose > 2 ) {
 }
 
 # An array to hold channel list and metadata
-my @metadata = ();
 my %request = (); # Value is metadata range for selection
+my @metadata = ();
+my $metadataxml;
 
 # Fetch metadata from the station web service
 foreach my $selection ( @selections ) {
@@ -753,14 +760,24 @@ sub FetchMetaData {
 
   print STDERR "Metadata URI: '$uri'\n" if ( $verbose > 1 );
 
-  print STDERR "Fetching metadata... " if ( $verbose );
+  print STDERR "Fetching metadata :: Received " if ( $verbose );
 
-  # Fetch metadata from web service
-  my $response = $ua->get($uri);
+  $datasize = 0;
+  $metadataxml = "";
 
-  if ( ! $response->is_success() ) {
-    print STDERR "Error fetching data '$uri'\n";
-    return;
+  # Fetch metadata from web service using callback routine
+  my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
+
+  if ( $response->code == 404 ) {
+    print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n";
+  }
+  elsif ( ! $response->is_success() ) {
+    print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
+      . $response->code . " :: " . status_message($response->code) . "\n";
+    print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+  }
+  else {
+    print STDERR "\n" if ( $verbose );
   }
 
   # Create stream oriented XML parser instance
@@ -769,13 +786,16 @@ sub FetchMetaData {
 
   my $totalepochs = 0;
 
-  # Parse XML metadata
-  $parser->parse_string ($response->content);
+  my $tstamp = time;
 
-  print STDERR "Done.\n" if ( $verbose );
+  print STDERR "Parsing XML metadata... " if ( $verbose );
+
+  # Parse XML metadata
+  $parser->parse_string ($metadataxml);
+
+  printf STDERR "Done (%d seconds)\n", time - $tstamp if ( $verbose );
 
   print "Received metadata for $totalepochs channel epochs\n";
-
 
   ## Beginning of SAX MDSHandler, event-based streaming XML parsing
   package MDSHandler;
@@ -901,6 +921,25 @@ sub FetchMetaData {
     }
   }
 } # End of FetchMetaData()
+
+
+######################################################################
+# MDCallBack:
+#
+# A call back for LWP downloading of metadata.
+#
+# Add received data to metadataxml string, tally up the received data
+# size and print and updated (overwriting) byte count string.
+######################################################################
+sub MDCallBack {
+  my ($data, $response, $protocol) = @_;
+  $metadataxml .= $data;
+  $datasize += length($data);
+
+  if ( $verbose ) {
+    printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
+  }
+}
 
 
 ######################################################################
