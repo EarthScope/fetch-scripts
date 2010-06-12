@@ -66,7 +66,7 @@
 #  - Add -a option to specify authorization credentials
 #
 # 2010.163:
-#  - Add download handler for XML metadata for improved feedback
+#  - Add download handler and timer for XML metadata for improved feedback
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
