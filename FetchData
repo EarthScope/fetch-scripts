@@ -69,18 +69,21 @@
 #  - Add download handler and timer for XML metadata for improved feedback
 #  - Use HTTP Keep-Alive connections for waveforms, SACPZs and RESPs
 #
+# 2010.171:
+#  - Add check for start/end times when requesting waveform data
+#  - Add fetching timers and rate calculations for improved feedback
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
 use File::Basename;
 use Getopt::Long;
 use LWP::UserAgent;
-use LWP::ConnCache;
 use HTTP::Status qw(status_message);
 use HTTP::Date;
-use Data::Dumper;
+use Time::HiRes;
 
-my $version  = "2010.163";
+my $version  = "2010.171";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/mds/';
@@ -172,6 +175,11 @@ if ( $sacpzdir && ! -d "$sacpzdir" ) {
 }
 if ( $respdir && ! -d "$respdir" ) {
   die "Cannot find RESP output directory: $respdir\n";
+}
+
+# Check for time window if requesting waveform data
+if ( $outfile && ( ! defined $starttime || ! defined $endtime ) ) {
+  die "Cannot request waveform data without start and end times\n";
 }
 
 # Normalize time strings
@@ -279,16 +287,11 @@ if ( $verbose > 2 ) {
   }
 }
 
-# Track bytes downloaded
-my $totalbytes = 0;
+# Track bytes downloaded in callback handlers
 my $datasize = 0;
 
 # Fetch waveform data if output file specified
-if ( $outfile ) {
-  &FetchWaveformData();
-
-  printf STDERR "Received %s of waveform data\n", sizestring($totalbytes);
-}
+&FetchWaveformData() if ( $outfile );
 
 # Collect SAC P&Zs if output directory specified
 &FetchSACPZ if ( $sacpzdir );
@@ -511,6 +514,8 @@ sub FetchWaveformData {
   my $total = scalar keys %request;
 
   print STDERR "Fetching waveform data\n" if ( $verbose );
+  my $ftime = Time::HiRes::time;
+  my $totalbytes = 0;
 
   foreach my $req ( sort keys %request ) {
     my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend) = split (/\|/, $req);
@@ -532,7 +537,7 @@ sub FetchWaveformData {
     my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
 
     if ( $response->code == 404 ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n";
+      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
       $request{$req} = undef;
     }
     elsif ( ! $response->is_success() ) {
@@ -550,6 +555,10 @@ sub FetchWaveformData {
   }
 
   close OUT;
+
+  my $duration = Time::HiRes::time - $ftime;
+  printf ("Received %s of waveform data in %.1f seconds (%.1f B/s)\n",
+	  sizestring($totalbytes), $duration, $totalbytes/($duration)?$duration:0.000001);
 
   # Remove empty file
   unlink $outfile if ( -z $outfile );
@@ -573,6 +582,8 @@ sub FetchSACPZ {
   foreach my $req ( keys %request ) { $total++ if ( defined $request{$req} ); }
 
   print STDERR "Fetching SAC Poles and Zeros\n" if ( $verbose );
+  my $ftime = Time::HiRes::time;
+  my $totalbytes = 0;
 
   foreach my $req ( sort keys %request ) {
     # Skip entries with values not set to 1, perhaps no data was fetched
@@ -608,7 +619,7 @@ sub FetchSACPZ {
     my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
 
     if ( $response->code == 404 ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n";
+      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
       print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
@@ -619,11 +630,19 @@ sub FetchSACPZ {
       print STDERR "\n" if ( $verbose );
     }
 
+    # Add data bytes to global total
+    $totalbytes += $datasize;
+
     close OUT;
 
     # Remove file if no data was fetched
     unlink $sacpzfile if ( $datasize == 0 );
   }
+
+  my $duration = Time::HiRes::time - $ftime;
+  printf ("Received %s of SAC P&Zs in %.1f seconds (%.1f B/s)\n",
+	  sizestring($totalbytes), $duration, $totalbytes/($duration)?$duration:0.000001);
+
 } # End of FetchSACPZ
 
 
@@ -644,6 +663,8 @@ sub FetchRESP {
   foreach my $req ( keys %request ) { $total++ if ( defined $request{$req} ); }
 
   print STDERR "Fetching RESP\n" if ( $verbose );
+  my $ftime = Time::HiRes::time;
+  my $totalbytes = 0;
 
   foreach my $req ( sort keys %request ) {
     # Skip entries with values not set to 1, perhaps no data was fetched
@@ -682,7 +703,7 @@ sub FetchRESP {
     my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
 
     if ( $response->code == 404 ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n";
+      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
       print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
@@ -693,11 +714,19 @@ sub FetchRESP {
       print STDERR "\n" if ( $verbose );
     }
 
+    # Add data bytes to global total
+    $totalbytes += $datasize;
+
     close OUT;
 
     # Remove file if no data was fetched
     unlink $respfile if ( $datasize == 0 );
   }
+
+  my $duration = Time::HiRes::time - $ftime;
+  printf ("Received %s of RESP in %.1f seconds (%.1f B/s)\n",
+	  sizestring($totalbytes), $duration, $totalbytes/($duration)?$duration:0.000001);
+
 } # End of FetchRESP
 
 
@@ -760,6 +789,8 @@ sub FetchMetaData {
     $uri .= "&timewindow=${startdate}-${enddate}";
   }
 
+  my $ftime = Time::HiRes::time;
+
   print STDERR "Metadata URI: '$uri'\n" if ( $verbose > 1 );
 
   print STDERR "Fetching metadata :: Received " if ( $verbose );
@@ -771,7 +802,7 @@ sub FetchMetaData {
   my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
 
   if ( $response->code == 404 ) {
-    print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n";
+    print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
   }
   elsif ( ! $response->is_success() ) {
     print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
@@ -788,16 +819,18 @@ sub FetchMetaData {
 
   my $totalepochs = 0;
 
-  my $tstamp = time;
+  my $ptime = Time::HiRes::time;
 
   print STDERR "Parsing XML metadata... " if ( $verbose );
 
   # Parse XML metadata
   $parser->parse_string ($metadataxml);
 
-  printf STDERR "Done (%d seconds)\n", time - $tstamp if ( $verbose );
+  printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose );
 
-  print "Received metadata for $totalepochs channel epochs\n";
+  my $duration = Time::HiRes::time - $ftime;
+  printf ("Received %s of metadata for $totalepochs channel epochs in %.1f seconds (%.1f B/s)\n",
+	  sizestring($datasize), $duration, $datasize/($duration)?$duration:0.000001);
 
   ## Beginning of SAX MDSHandler, event-based streaming XML parsing
   package MDSHandler;
