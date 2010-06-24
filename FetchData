@@ -73,6 +73,9 @@
 #  - Add check for start/end times when requesting waveform data
 #  - Add fetching timers and rate calculations for improved feedback
 #
+# 2010.175:
+#  - Fix rate calculations.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -83,7 +86,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2010.171";
+my $version  = "2010.175";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/mds/';
@@ -557,8 +560,9 @@ sub FetchWaveformData {
   close OUT;
 
   my $duration = Time::HiRes::time - $ftime;
-  printf ("Received %s of waveform data in %.1f seconds (%.1f B/s)\n",
-	  sizestring($totalbytes), $duration, $totalbytes/($duration)?$duration:0.000001);
+  my $rate = $datasize/(($duration)?$duration:0.000001);
+  printf ("Received %s of waveform data in %.1f seconds (%s/s)\n",
+	  sizestring($datasize), $duration, sizestring($rate));
 
   # Remove empty file
   unlink $outfile if ( -z $outfile );
@@ -640,8 +644,9 @@ sub FetchSACPZ {
   }
 
   my $duration = Time::HiRes::time - $ftime;
-  printf ("Received %s of SAC P&Zs in %.1f seconds (%.1f B/s)\n",
-	  sizestring($totalbytes), $duration, $totalbytes/($duration)?$duration:0.000001);
+  my $rate = $datasize/(($duration)?$duration:0.000001);
+  printf ("Received %s of SAC P&Zs in %.1f seconds (%s/s)\n",
+	  sizestring($datasize), $duration, sizestring($rate));
 
 } # End of FetchSACPZ
 
@@ -724,8 +729,9 @@ sub FetchRESP {
   }
 
   my $duration = Time::HiRes::time - $ftime;
-  printf ("Received %s of RESP in %.1f seconds (%.1f B/s)\n",
-	  sizestring($totalbytes), $duration, $totalbytes/($duration)?$duration:0.000001);
+  my $rate = $datasize/(($duration)?$duration:0.000001);
+  printf ("Received %s of RESP in %.1f seconds (%s/s)\n",
+	  sizestring($datasize), $duration, sizestring($rate));
 
 } # End of FetchRESP
 
@@ -829,8 +835,9 @@ sub FetchMetaData {
   printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose );
 
   my $duration = Time::HiRes::time - $ftime;
-  printf ("Received %s of metadata for $totalepochs channel epochs in %.1f seconds (%.1f B/s)\n",
-	  sizestring($datasize), $duration, $datasize/($duration)?$duration:0.000001);
+  my $rate = $datasize/(($duration)?$duration:0.000001);
+  printf ("Received %s of metadata for $totalepochs channel epochs in %.1f seconds (%s/s)\n",
+	  sizestring($datasize), $duration, sizestring($rate));
 
   ## Beginning of SAX MDSHandler, event-based streaming XML parsing
   package MDSHandler;
