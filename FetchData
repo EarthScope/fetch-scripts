@@ -560,9 +560,9 @@ sub FetchWaveformData {
   close OUT;
 
   my $duration = Time::HiRes::time - $ftime;
-  my $rate = $datasize/(($duration)?$duration:0.000001);
+  my $rate = $totalbytes/(($duration)?$duration:0.000001);
   printf ("Received %s of waveform data in %.1f seconds (%s/s)\n",
-	  sizestring($datasize), $duration, sizestring($rate));
+	  sizestring($totalbytes), $duration, sizestring($rate));
 
   # Remove empty file
   unlink $outfile if ( -z $outfile );
@@ -750,7 +750,7 @@ sub DLCallBack {
   $datasize += length($data);
 
   if ( $verbose ) {
-    printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
+    printf (STDERR " %-10.10s\b\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
   }
 }
 
