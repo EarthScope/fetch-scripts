@@ -995,7 +995,7 @@ sub sizestring { # sizestring (bytes)
   my $bytes = shift;
 
   if ( $bytes < 1000 ) {
-    return sprintf "$bytes Bytes";
+    return sprintf "%d Bytes", $bytes;
   }
   elsif ( ($bytes / 1024) < 1000 ) {
     return sprintf "%.1f KB", $bytes / 1024;
@@ -1003,11 +1003,11 @@ sub sizestring { # sizestring (bytes)
   elsif ( ($bytes / 1024 / 1024) < 1000 ) {
     return sprintf "%.1f MB", $bytes / 1024 / 1024;
   }
-  elsif ( ($bytes / 1024 / 1024 / 1024 / 1024) < 1000 ) {
-    return sprintf "%.1f GB", $bytes / 1024 / 1024 / 1024 / 1024;
+  elsif ( ($bytes / 1024 / 1024 / 1024) < 1000 ) {
+    return sprintf "%.1f GB", $bytes / 1024 / 1024 / 1024;
   }
-  elsif ( ($bytes / 1024 / 1024 / 1024 / 1024 / 1024) < 1000 ) {
-    return sprintf "%.1f TB", $bytes / 1024 / 1024 / 1024 / 1024 / 1024;
+  elsif ( ($bytes / 1024 / 1024 / 1024 / 1024) < 1000 ) {
+    return sprintf "%.1f TB", $bytes / 1024 / 1024 / 1024 / 1024;
   }
   else {
     return "";
