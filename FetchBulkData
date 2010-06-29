@@ -77,6 +77,9 @@
 #  - Branch from FetchData to use the bulk data selection webservice,
 #      reorganize quality to be specified as a global selection in URI.
 #
+# 2010.180
+#  - Change quality designation to go into selection block (POST)
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -87,7 +90,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2010.177";
+my $version  = "2010.180";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/mds/';
@@ -520,10 +523,10 @@ sub FetchWaveformData {
   my $totalbytes = 0;
 
   # Create web service URI
-  my $uri = "${waveformservice}?quality=$qual";
+  my $uri = "${waveformservice}";
 
   # Create POST data selection
-  my $postdata = "";
+  my $postdata = "quality $qual";
 
   foreach my $req ( sort keys %request ) {
     my ($wnet,$wsta,$wloc,$wchan,$wstart,$wend) = split (/\|/, $req);
