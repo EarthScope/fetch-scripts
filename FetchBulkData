@@ -525,8 +525,8 @@ sub FetchWaveformData {
   # Create web service URI
   my $uri = "${waveformservice}";
 
-  # Create POST data selection
-  my $postdata = "quality $qual";
+  # Create POST data selection: specify quality followed by selections
+  my $postdata = "quality $qual\n";
 
   foreach my $req ( sort keys %request ) {
     my ($wnet,$wsta,$wloc,$wchan,$wstart,$wend) = split (/\|/, $req);
