@@ -80,6 +80,9 @@
 # 2010.180
 #  - Change quality designation to go into selection block (POST)
 #
+# 2010.187
+#  - Convert compenent inclination/dip to SAC convention (+90) by default.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -90,7 +93,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2010.180";
+my $version  = "2010.187";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/mds/';
@@ -318,6 +321,9 @@ if ( $metafile ) {
   foreach my $channel ( sort @metadata ) {
     my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip) =
       split (/,/, $channel);
+
+    # Convert inclination/dip to SAC convention
+    $dip += 90;
 
     print META "$net,$sta,$loc,$chan,,$lat,$lon,$elev,$depth,$azimuth,$dip,,$start,$end\n";
   }
