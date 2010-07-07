@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# FetchData
+# FetchBulkData
 #
 # Fetch bulk data from the DMC web interfaces.  This program is
 # primarily written to select and fetch waveform data but can also
@@ -35,8 +35,10 @@
 # contain:
 # "net,sta,loc,chan,scale,lat,lon,elev,depth,azimuth,dip,instrument,start,end"
 #
-# This metadata file can be used directly with mseed2sac or tracedsp
-# to create SAC files including basic metadata.
+# The dip field in this output will be converted from the SEED to SAC
+# convention by adding 90.  This metadata file can be used directly
+# with mseed2sac or tracedsp to create SAC files including basic
+# metadata.
 #
 # SAC P&Zs: If the -sd option is given SAC Poles and Zeros will be
 # fetched and a file for each channel will be written to the specified
@@ -80,8 +82,9 @@
 # 2010.180
 #  - Change quality designation to go into selection block (POST)
 #
-# 2010.187
-#  - Convert compenent inclination/dip to SAC convention (+90) by default.
+# 2010.188
+#  - Convert compenent inclination/dip to SAC convention (+90) when
+#  writing metadata to an output file, header field is now "SACdip".
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -93,7 +96,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2010.187";
+my $version  = "2010.188";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/mds/';
@@ -316,7 +319,7 @@ if ( $metafile ) {
   open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
 
   # Print header line
-  print META "#net,sta,loc,chan,scale,lat,lon,elev,depth,azimuth,dip,instrument,start,end\n";
+  print META "#net,sta,loc,chan,scale,lat,lon,elev,depth,azimuth,SACdip,instrument,start,end\n";
 
   foreach my $channel ( sort @metadata ) {
     my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip) =
