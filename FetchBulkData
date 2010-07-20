@@ -83,8 +83,11 @@
 #  - Change quality designation to go into selection block (POST)
 #
 # 2010.188
-#  - Convert compenent inclination/dip to SAC convention (+90) when
+#  - Convert component inclination/dip to SAC convention (+90) when
 #  writing metadata to an output file, header field is now "SACdip".
+#
+# 2010.201
+#  - Fix up total download size reporting.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -96,7 +99,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2010.188";
+my $version  = "2010.201";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/mds/';
@@ -658,9 +661,9 @@ sub FetchSACPZ {
   }
 
   my $duration = Time::HiRes::time - $ftime;
-  my $rate = $datasize/(($duration)?$duration:0.000001);
+  my $rate = $totalbytes/(($duration)?$duration:0.000001);
   printf ("Received %s of SAC P&Zs in %.1f seconds (%s/s)\n",
-	  sizestring($datasize), $duration, sizestring($rate));
+	  sizestring($totalbytes), $duration, sizestring($rate));
 
 } # End of FetchSACPZ
 
@@ -743,9 +746,9 @@ sub FetchRESP {
   }
 
   my $duration = Time::HiRes::time - $ftime;
-  my $rate = $datasize/(($duration)?$duration:0.000001);
+  my $rate = $totalbytes/(($duration)?$duration:0.000001);
   printf ("Received %s of RESP in %.1f seconds (%s/s)\n",
-	  sizestring($datasize), $duration, sizestring($rate));
+	  sizestring($totalbytes), $duration, sizestring($rate));
 
 } # End of FetchRESP
 
