@@ -135,9 +135,10 @@ if ( ! $getoptsret || $usage || ! $required ) {
   exit 1;
 }
 
-# Check for time window if requesting time series data
-if ( $outfile && ( ! defined $starttime || ! defined $endtime ) ) {
-  die "Cannot request time series data without start and end times\n";
+# Check for time window if requesting waveform data
+if ( $outfile && ( ! defined $selectfile && ! defined $bfastfile &&
+		   ( ! defined $starttime || ! defined $endtime ) ) ) {
+  die "Cannot request waveform data without start and end times\n";
 }
 
 # Normalize time strings

@@ -204,7 +204,8 @@ if ( $respdir && ! -d "$respdir" ) {
 }
 
 # Check for time window if requesting waveform data
-if ( $outfile && ( ! defined $starttime || ! defined $endtime ) ) {
+if ( $outfile && ( ! defined $selectfile && ! defined $bfastfile &&
+		   ( ! defined $starttime || ! defined $endtime ) ) ) {
   die "Cannot request waveform data without start and end times\n";
 }
 
