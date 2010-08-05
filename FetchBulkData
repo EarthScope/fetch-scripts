@@ -558,7 +558,7 @@ sub FetchWaveformData {
   }
 
   if ( ! $count ) {
-    print STDERR "Do data selections to request\n";
+    print STDERR "No data selections to request\n";
     return;
   }
 
