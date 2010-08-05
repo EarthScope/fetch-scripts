@@ -1,8 +1,10 @@
 #!/usr/bin/perl
 #
-# FetchSACPZ
+# FetchTimeseries
 #
-# Fetch SAC Poles and Zeros from the DMC web interfaces.
+# Fetch processed time series the DMC web interfaces.  This program is
+# primarily written to select and fetch waveform data but can also
+# fetch metadata.
 #
 # WARNING: This script uses a deprecated version of the DMC's metadata
 # service, the service will be retired and this script will be updated
@@ -13,12 +15,13 @@
 # Installation of the XML::SAX::ExpatXS module will significantly
 # speed up the parsing of metadata results returned as XML.
 #
-# SAC P&Z selection
+# Data selection
 #
-# Selections are generally done by specifying network, station,
-# location, channel, start time and end time.  The name parameters may
-# contain wildcard characters.  All input options are optional.
-# Selections may be specified one of three ways:
+# Data is generally selected by specifying network, station, location,
+# channel, quality, start time and end time.  The name parameters may
+# contain wildcard characters.  All input options are optional but
+# waveform requests should include a time window.  Data may be
+# selected one of three ways:
 #
 # 1) Command line arguments: -N, -S, -L, -C, -Q, -s, -e
 #
@@ -27,17 +30,27 @@
 #
 # 3) A BREQ_FAST formatted file
 #
-# SAC P&Z output
+# Data output
 #
-# SAC Poles and Zeros will be written to the specified directory, or
-# the current directory by default, with the name
-# 'SACPZ.Net.Sta.Loc.Chan'.
+# miniSEED: If the -o option is used to specify an output file
+# waveform data will be requested based on the selection and all
+# written to the single file.
+#
+# metadata: If the -m option is used to specifiy a metadata file a
+# line will be written to the file for each channel epoch and will
+# contain:
+# "net,sta,loc,chan,scale,lat,lon,elev,depth,azimuth,dip,instrument,start,end"
+#
+# The dip field in this output will be converted from the SEED to SAC
+# convention by adding 90.  This metadata file can be used directly
+# with mseed2sac or tracedsp to create SAC files including basic
+# metadata.
 #
 #
 # ## Change history ##
 #
-# 2010.217:
-#  - Initial version, split from FetchBulkData 2010.217
+# 2010.217
+#  - Initial version, spilt from FetchBulkData 2010.217
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -54,11 +67,11 @@ my $version  = "2010.217";
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/mds/';
 
-# Web service for SAC P&Z
-my $sacpzservice = 'http://www.iris.edu/ws/sacpz/query';
+# Web service for time series data
+my $timeseriesservice = 'http://www.iris.edu/ws/timeseries/query';
 
 # HTTP UserAgent reported to web services
-my $useragent = "FetchSACPZ/$version";
+my $useragent = "FetchTimeseries/$version";
 
 my $usage      = undef;
 my $verbose    = undef;
@@ -67,13 +80,15 @@ my $net        = undef;
 my $sta        = undef;
 my $loc        = undef;
 my $chan       = undef;
+my $qual       = "B";
 my $starttime  = undef;
 my $endtime    = undef;
 my $selectfile = undef;
 my $bfastfile  = undef;
 my $auth       = undef;
-my $sacpzdir   = ".";
-
+my $outfile    = undef;
+my $metafile   = undef;
+my $outformat  = "miniseed";
 
 # Parse command line arguments
 Getopt::Long::Configure ("bundling_override");
@@ -83,46 +98,46 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
                               'sta|S=s'        => \$sta,
                               'loc|L=s'        => \$loc,
                               'chan|C=s'       => \$chan,
+                              'qual|Q=s'       => \$qual,
 			      'starttime|s=s'  => \$starttime,
 			      'endtime|e=s'    => \$endtime,
 			      'selectfile|l=s' => \$selectfile,
 			      'bfastfile|b=s'  => \$bfastfile,
 			      'auth|a=s'       => \$auth,
-			      'sacpzdir|sd=s'  => \$sacpzdir,
+			      'outfile|o=s'    => \$outfile,
+			      'metafile|m=s'   => \$metafile,
 			    );
 
 my $required =  ( defined $net || defined $sta ||
 		  defined $loc || defined $chan ||
 		  defined $starttime || defined $endtime ||
 		  defined $selectfile || defined $bfastfile );
-
 if ( ! $getoptsret || $usage || ! $required ) {
   my $script = basename($0);
-  print "$script: collect SAC Poles and Zeros from the IRIS DMC (version $version)\n\n";
+  print "$script: collect processed time series from the IRIS DMC ($version)\n\n";
   print "Usage: $script [options]\n\n";
   print " Options:\n";
-  print " -v              Increase verbosity, may be specified multiple times\n";
-  print " -N,--net        Network code, default is all\n";
-  print " -S,--sta        Station code, default is all\n";
-  print " -L,--loc        Location ID, default is all\n";
-  print " -C,--chan       Channel codes, default is all\n";
-  print " -s starttime    Specify start time (YYYY/MM/DD HH:MM:SS)\n";
-  print " -e endtime      Specify end time (YYYY/MM/DD HH:MM:SS)\n";
-  print " -l listfile     Read list of selections from file\n";
-  print " -b bfastfile    Read list of selections from BREQ_FAST file\n";
-  print " -a user:pass    User and password when authentication is needed\n";
+  print " -v                Increase verbosity, may be specified multiple times\n";
+  print " -N,--net          Network code, default is all\n";
+  print " -S,--sta          Station code, default is all\n";
+  print " -L,--loc          Location ID, default is all\n";
+  print " -C,--chan         Channel codes, default is all\n";
+  print " -Q,--qual         Quality indicator, default is best\n";
+  print " -s starttime      Specify start time (YYYY/MM/DD HH:MM:SS)\n";
+  print " -e endtime        Specify end time (YYYY/MM/DD HH:MM:SS)\n";
+  print " -l listfile       Read list of selections from file\n";
+  print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
+  print " -a user:pass      User and password when authentication is needed\n";
   print "\n";
-  print " -sd sacpzdir    Write SAC P&Z files to sacpzdir, default is current directory\n";
-  print "\n";
-  print "Warning: SAC Poles & Zeros files written by this program may contain the\n";
-  print "  relevant channel response for more than one time span\n";
+  print " -o outfile        Fetch processed timeseries and write to output file\n";
+  print " -m metafile       Write basic metadata to specified file\n";
   print "\n";
   exit 1;
 }
 
-# Check for existence of output directories
-if ( $sacpzdir && ! -d "$sacpzdir" ) {
-  die "Cannot find SAC P&Zs output directory: $sacpzdir\n";
+# Check for time window if requesting time series data
+if ( $outfile && ( ! defined $starttime || ! defined $endtime ) ) {
+  die "Cannot request time series data without start and end times\n";
 }
 
 # Normalize time strings
@@ -233,8 +248,30 @@ if ( $verbose > 2 ) {
 # Track bytes downloaded in callback handlers
 my $datasize = 0;
 
-# Collect SAC P&Zs if output directory specified
-&FetchSACPZ if ( $sacpzdir );
+# Fetch time series data if output file specified
+&FetchTimeseries() if ( $outfile );
+
+# Write metadata to file
+if ( $metafile ) {
+  printf STDERR "Writing metadata (%d channel epochs) file\n", scalar @metadata if ( $verbose );
+
+  open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
+
+  # Print header line
+  print META "#net,sta,loc,chan,scale,lat,lon,elev,depth,azimuth,SACdip,instrument,start,end\n";
+
+  foreach my $channel ( sort @metadata ) {
+    my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip) =
+      split (/,/, $channel);
+
+    # Convert inclination/dip to SAC convention
+    $dip += 90;
+
+    print META "$net,$sta,$loc,$chan,,$lat,$lon,$elev,$depth,$azimuth,$dip,,$start,$end\n";
+  }
+
+  close META;
+}
 
 print STDERR "DONE\n";
 ## End of main
@@ -300,6 +337,12 @@ sub ReadBFastFile {
     chomp $line;
     $linecount++;
     next if ( ! $line ); # Skip empty lines
+
+    # Capture .QUALTIY header
+    if ( $line =~ /^\.QUALITY .*$/ ) {
+      ($qual) = $line =~ /^\.QUALITY ([DRQMB])/;
+      next;
+    }
 
     next if ( $line =~ /^\./ ); # Skip other header lines
 
@@ -408,52 +451,39 @@ sub ReadBFastFile {
 
 
 ######################################################################
-# FetchSACPZ:
+# FetchTimeseries:
 #
-# Fetch SAC Poles and Zeros for each entry in the %request hash with a
-# defined value.  The result for each channel is written to a separate
-# file in the specified directory.
+# Collect processed time series data for each entry in the %request
+# hash.  All returned data is written to the global output file
+# handle.
 #
 ######################################################################
-sub FetchSACPZ {
+sub FetchTimeseries {
+  # Open output file
+  open (OUT, ">$outfile") || die "Cannot open output file '$outfile': $!\n";
+
   # Create HTTP user agent
   my $ua = RequestAgent->new(keep_alive => 1);
 
   my $count = 0;
-  my $total = 0;
-  foreach my $req ( keys %request ) { $total++ if ( defined $request{$req} ); }
 
-  print STDERR "Fetching SAC Poles and Zeros\n" if ( $verbose );
+  print STDERR "Fetching time series data\n" if ( $verbose );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
   foreach my $req ( sort keys %request ) {
-    # Skip entries with values not set to 1, perhaps no data was fetched
-    next if ( ! defined $request{$req} );
-
-    my ($rnet,$rsta,$rloc,$rchan,$rstart,$rend) = split (/\|/, $req);
-    my ($mstart,$mend) = split (/\|/, $request{$req});
+    my ($wnet,$wsta,$wloc,$wchan,$wstart,$wend) = split (/\|/, $req);
     $count++;
 
-    # Generate output file name and open
-    my $sacpzfile = "$sacpzdir/SACPZ.$rnet.$rsta.$rloc.$rchan";
-    if ( ! open (OUT, ">$sacpzfile") ) {
-      print STDERR "Cannot open output file '$sacpzfile': $!\n";
-      next;
-    }
-
-    # Use metadata start and end if not specified
-    $rstart = $mstart if ( ! $rstart );
-    $rend = $mend if ( ! $rend );
-
     # Create web service URI
-    my $uri = "${sacpzservice}?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
-    $uri .= "&starttime=$rstart" if ( $rstart );
-    $uri .= "&endtime=$rend" if ( $rend );
+    my $uri = "${timeseriesservice}?net=$wnet&sta=$wsta&loc=$wloc&cha=$wchan";
+    $uri .= "&starttime=$wstart" if ( $wstart );
+    $uri .= "&endtime=$wend" if ( $wend );
+    $uri .= "&output=$outformat" if ( $outformat );
 
-    print STDERR "SAC-PZ URI: '$uri'\n" if ( $verbose > 1 );
+    print STDERR "Timeseries URI: '$uri'\n" if ( $verbose > 1 );
 
-    print STDERR "Downloading $sacpzfile ($count/$total) :: Received " if ( $verbose );
+    print STDERR "Downloading time series data ($count selections) :: Received " if ( $verbose );
 
     $datasize = 0;
 
@@ -474,19 +504,23 @@ sub FetchSACPZ {
 
     # Add data bytes to global total
     $totalbytes += $datasize;
+  }
 
-    close OUT;
+  close OUT;
 
-    # Remove file if no data was fetched
-    unlink $sacpzfile if ( $datasize == 0 );
+  if ( ! $count ) {
+    print STDERR "No data selections to request\n";
+    return;
   }
 
   my $duration = Time::HiRes::time - $ftime;
-  my $rate = $totalbytes/(($duration)?$duration:0.000001);
-  printf (STDERR "Received %s of SAC P&Zs in %.1f seconds (%s/s)\n",
+  my $rate = $datasize/(($duration)?$duration:0.000001);
+  printf (STDERR "Received %s of time series data in %.1f seconds (%s/s)\n",
 	  sizestring($totalbytes), $duration, sizestring($rate));
 
-} # End of FetchSACPZ
+  # Remove empty file
+  unlink $outfile if ( -z $outfile );
+} # End of FetchTimeseries
 
 
 ######################################################################
@@ -592,7 +626,7 @@ sub FetchMetaData {
 
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $datasize/(($duration)?$duration:0.000001);
-  printf ("Received %s of metadata for $totalepochs channel epochs in %.1f seconds (%s/s)\n",
+  printf (STDERR "Received %s of metadata for $totalepochs channel epochs in %.1f seconds (%s/s)\n",
 	  sizestring($datasize), $duration, sizestring($rate));
 
   ## Beginning of SAX MDSHandler, event-based streaming XML parsing

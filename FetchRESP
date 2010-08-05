@@ -331,7 +331,7 @@ sub ReadBFastFile {
       print "Unrecognized start min: '$smin', skipping line $linecount\n" if ( $verbose );
       next;
     }
-    if ( $ssec !~ /^\d{1,2}\.?\d?$/ ) {
+    if ( $ssec !~ /^\d{1,2}\.?\d{0,4}?$/ ) {
       print "Unrecognized start seconds: '$ssec', skipping line $linecount\n" if ( $verbose );
       next;
     }
