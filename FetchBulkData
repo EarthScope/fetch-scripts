@@ -99,6 +99,10 @@
 #  - Cleanup some documentation, add warnings about metadata service.
 #  - Print "DONE" and "Received ..." output to STDERR for consistency.
 #
+# 2010.273
+# - Add -A option to specify an application name/version, this will be
+# added to the UserAgent string.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -109,7 +113,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2010.217";
+my $version  = "2010.273";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/mds/';
@@ -138,12 +142,12 @@ my $starttime  = undef;
 my $endtime    = undef;
 my $selectfile = undef;
 my $bfastfile  = undef;
+my $appname    = undef;
 my $auth       = undef;
 my $outfile    = undef;
 my $sacpzdir   = undef;
 my $respdir    = undef;
 my $metafile   = undef;
-
 
 # Parse command line arguments
 Getopt::Long::Configure ("bundling_override");
@@ -158,6 +162,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
 			      'endtime|e=s'    => \$endtime,
 			      'selectfile|l=s' => \$selectfile,
 			      'bfastfile|b=s'  => \$bfastfile,
+			      'appname|A=s'    => \$appname,
 			      'auth|a=s'       => \$auth,
 			      'outfile|o=s'    => \$outfile,
 			      'sacpzdir|sd=s'  => \$sacpzdir,
@@ -185,6 +190,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -e endtime        Specify end time (YYYY/MM/DD HH:MM:SS)\n";
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
+  print " -A appname        Application/version string for identification\n";
   print " -a user:pass      User and password when authentication is needed\n";
   print "\n";
   print " -o outfile        Fetch waveform data and write to output file\n";
@@ -234,7 +240,9 @@ if ( $endtime ) {
   sub new
     {
       my $self = LWP::UserAgent::new(@_);
-      $self->agent($useragent);
+      my $fulluseragent = $useragent;
+      $fulluseragent .= " ($appname)" if ( $appname );
+      $self->agent($fulluseragent);
       $self;
     }
 
