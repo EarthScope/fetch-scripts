@@ -4,12 +4,6 @@
 #
 # Fetch SAC Poles and Zeros from the DMC web interfaces.
 #
-# WARNING: This script uses a deprecated version of the DMC's metadata
-# service, the service will be retired and this script will be updated
-# when the replacement service is ready.  The replacement service will
-# include channel sensitivity (scale) which the deprecated version
-# does not.
-#
 # Installation of the XML::SAX::ExpatXS module will significantly
 # speed up the parsing of metadata results returned as XML.
 #
@@ -43,6 +37,10 @@
 # - Add -A option to specify an application name/version, this will be
 # added to the UserAgent string.
 #
+# 2010.342
+#  - Convert metadata fetching to use the production ws-station service
+#  instead of the deprecated service previously used.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -53,10 +51,10 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2010.273";
+my $version  = "2010.342";
 
 # Web service for metadata
-my $metadataservice = 'http://www.iris.edu/mds/';
+my $metadataservice = 'http://www.iris.edu/ws/station/query';
 
 # Web service for SAC P&Z
 my $sacpzservice = 'http://www.iris.edu/ws/sacpz/query';
@@ -142,54 +140,6 @@ if ( $endtime ) {
   my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $endtime);
   $endtime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
 }
-
-######################################################################
-#
-# Package RequestAgent: a superclass for LWP::UserAgent with override
-# of LWP::UserAgent methods to set default user agent and handle
-# authentication credentials.
-#
-######################################################################
-{
-  package RequestAgent;
-  our @ISA = qw(LWP::UserAgent);
-
-  sub new
-    {
-      my $self = LWP::UserAgent::new(@_);
-      my $fulluseragent = $useragent;
-      $fulluseragent .= " ($appname)" if ( $appname );
-      $self->agent($fulluseragent);
-      $self;
-    }
-
-  sub get_basic_credentials
-    {
-      my ($self, $realm, $uri) = @_;
-
-      if ( defined $auth ) {
-	return split(':', $auth, 2);
-      }
-      elsif (-t) {
-	my $netloc = $uri->host_port;
-	print "\n";
-	print "Enter username for $realm at $netloc: ";
-	my $user = <STDIN>;
-	chomp($user);
-	return (undef, undef) unless length $user;
-	print "Password: ";
-	system("stty -echo");
-	my $password = <STDIN>;
-	system("stty echo");
-	print "\n";  # because we disabled echo
-	chomp($password);
-	return ($user, $password);
-      }
-      else {
-	return (undef, undef)
-      }
-    }
-} # End of LWP::UserAgent override
 
 # An array to hold data selections
 my @selections = ();
@@ -522,12 +472,9 @@ sub DLCallBack {
 #
 # Collect metadata and expand wildcards for selected data set.
 #
-# WARNING: This routine uses a deprecated web interface and will be
-# rewritten when a suitable replacement is ready.
-#
 # Resulting metadata is placed in the global @metadata array with each
 # entry taking the following form:
-#   "net,sta,loc,chan,start,end,lat,lon,elev,depth,azimuth,dip"
+#   "net,sta,loc,chan,start,end,lat,lon,elev,depth,azimuth,dip,instrument,samplerate,sensitivity,sensfreq,sensunits"
 #
 # In addition, an entry for the unique NSLCQ time-window is added to
 # the %request hash, used later to request data.  The value of the
@@ -546,7 +493,7 @@ sub FetchMetaData {
   my $rendepoch = str2time ($rend);
 
   # Create web service URI
-  my $uri = "${metadataservice}?channels=true";
+  my $uri = "${metadataservice}?level=chan";
   $uri .= "&network=$rnet" if ( $rnet );
   $uri .= "&station=$rsta" if ( $rsta );
   $uri .= "&location=$rloc" if ( $rloc );
@@ -554,10 +501,8 @@ sub FetchMetaData {
   if ( $rstart && $rend ) {
     my ($startdate) = $rstart =~ /^(\d{4,4}-\d{1,2}-\d{1,2}).*$/;
     my ($enddate) = $rend =~ /^(\d{4,4}-\d{1,2}-\d{1,2}).*$/;
-    $startdate =~ s/-/\//g;
-    $enddate =~ s/-/\//g;
 
-    $uri .= "&timewindow=${startdate}-${enddate}";
+    $uri .= "&timewindow=${startdate},${enddate}";
   }
 
   my $ftime = Time::HiRes::time;
@@ -574,6 +519,7 @@ sub FetchMetaData {
 
   if ( $response->code == 404 ) {
     print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+    return;
   }
   elsif ( ! $response->is_success() ) {
     print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
@@ -601,131 +547,160 @@ sub FetchMetaData {
 
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $datasize/(($duration)?$duration:0.000001);
-  printf ("Received %s of metadata for $totalepochs channel epochs in %.1f seconds (%s/s)\n",
+  printf (STDERR "Received %s of metadata for $totalepochs channel epochs in %.1f seconds (%s/s)\n",
 	  sizestring($datasize), $duration, sizestring($rate));
+
+  ## End of this routine, below is the XML parsing handler used above
 
   ## Beginning of SAX MDSHandler, event-based streaming XML parsing
   package MDSHandler;
   use base qw(XML::SAX::Base);
   use HTTP::Date;
-  use Data::Dumper;
 
-  my $inchannel = 0;
+  my $inepoch = 0;
+  my $instart = 0;
+  my $inend = 0;
+  my $inlat = 0;
+  my $inlat = 0;
+  my $inlon = 0;
+  my $inelevation = 0;
+  my $indepth = 0;
   my $inazimuth = 0;
   my $indip = 0;
-  my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip) = (undef) x 12;
+  my $insamplerate = 0;
+  my $inequiptype = 0;
 
-  #print Dumper ($element);
+  my $intotalsens = 0;
+  my $insensvalue = 0;
+  my $ingainunits = 0;
+  my $infrequency = 0;
+
+  my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 17;
 
   sub start_element {
     my ($self,$element) = @_;
 
+    if ( $element->{Name} eq "Station" ) {
+      ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 17;
+
+      $net = $element->{Attributes}->{'{}net_code'}->{Value};
+      $sta = $element->{Attributes}->{'{}sta_code'}->{Value};
+    }
+
     if ( $element->{Name} eq "Channel" ) {
-      ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip) = (undef) x 12;
-
-      $net = $element->{Attributes}->{'{}networkCode'}->{Value};
-      $sta = $element->{Attributes}->{'{}stationCode'}->{Value};
-      $loc = $element->{Attributes}->{'{}locationCode'}->{Value};
-      $chan = $element->{Attributes}->{'{}channelCode'}->{Value};
-      $inchannel = 1;
+      $loc = $element->{Attributes}->{'{}loc_code'}->{Value};
+      $chan = $element->{Attributes}->{'{}chan_code'}->{Value};
     }
 
-    if ( $inchannel && $element->{Name} eq "Epoch" ) {
-      $start = $element->{Attributes}->{'{}start'}->{Value};;
-      $end = $element->{Attributes}->{'{}end'}->{Value};;
+    if ( $element->{Name} eq "Epoch" ) {
+      $inepoch = 1;
     }
 
-    if ( $inchannel && $element->{Name} eq "Latitude" ) {
-      $lat = $element->{Attributes}->{'{}value'}->{Value};
+    if ( $inepoch && $element->{Name} eq "StartDate" ) { $instart = 1; }
+    if ( $inepoch && $element->{Name} eq "EndDate" ) { $inend = 1; }
+    if ( $inepoch && $element->{Name} eq "Lat" ) { $inlat = 1; }
+    if ( $inepoch && $element->{Name} eq "Lon" ) { $inlon = 1; }
+    if ( $inepoch && $element->{Name} eq "Elevation" ) { $inelevation = 1; }
+    if ( $inepoch && $element->{Name} eq "Depth" ) { $indepth = 1; }
+    if ( $inepoch && $element->{Name} eq "Azimuth" ) { $inazimuth = 1; }
+    if ( $inepoch && $element->{Name} eq "Dip" ) { $indip = 1; }
+    if ( $inepoch && $element->{Name} eq "SampleRate" ) { $insamplerate = 1; }
+
+    if ( $inepoch && $element->{Name} eq "EquipType" ) { $inequiptype = 1; }
+
+    if ( $inepoch && $element->{Name} eq "Response" ) {
+      my $stage = $element->{Attributes}->{'{}stage'}->{Value};
+      $intotalsens = 1 if ( $stage eq "0" );
     }
 
-    if ( $inchannel && $element->{Name} eq "Longitude" ) {
-      $lon = $element->{Attributes}->{'{}value'}->{Value};
-    }
-
-    if ( $inchannel && $element->{Name} eq "Elevation" ) {
-      $elev = $element->{Attributes}->{'{}value'}->{Value};
-    }
-
-    if ( $inchannel && $element->{Name} eq "Depth" ) {
-      $depth = $element->{Attributes}->{'{}value'}->{Value};
-    }
-
-    if ( $inchannel && $element->{Name} eq "Azimuth" ) {
-      $azimuth = $element->{Attributes}->{'{}value'}->{Value};
-      $inazimuth = 1;
-    }
-
-    if ( $inchannel && $element->{Name} eq "Dip" ) {
-      $dip = $element->{Attributes}->{'{}value'}->{Value};
-      $indip = 1;
-    }
+    if ( $intotalsens && $element->{Name} eq "SensitivityValue" ) { $insensvalue = 1; }
+    if ( $intotalsens && $element->{Name} eq "GainUnits" ) { $ingainunits = 1; }
+    if ( $intotalsens && $element->{Name} eq "Frequency" ) { $infrequency = 1; }
   }
 
   sub end_element {
     my ($self,$element) = @_;
 
-    if ( $element->{Name} eq "Channel" ) {
-      ($net,$sta,$loc,$chan) = (undef) x 4;
-      $inchannel = 0;
+    if ( $element->{Name} eq "Station" ) {
+      ($net,$sta) = (undef) x 2;
     }
 
-    if ( $inchannel && $element->{Name} eq "Epoch" ) {
-      my $startepoch = str2time ($start);
-      my $endepoch = str2time ($end);
+    if ( $element->{Name} eq "Channel" ) {
+      ($loc,$chan) = (undef) x 2;
+    }
 
-      # Check that Channel Epoch is within request window, allow for open window requests
-      if ( ( ! $rstartepoch || ! $endepoch || ($rstartepoch <= $endepoch) ) &&
-	   ( ! $rendepoch || ($rendepoch >= $startepoch) ) )
-	{
-	  $totalepochs++;
+    if ( $element->{Name} eq "Epoch" ) {
+      # Track epoch count
+      $totalepochs++;
 
-	  # Translate metadata location ID to "--" if it's spaces
-	  my $dloc = ( $loc eq "  " ) ? "--" : $loc;
+      # Translate metadata location ID to "--" if it's spaces
+      my $dloc = ( $loc eq "  " ) ? "--" : $loc;
 
-	  # Cleanup start and end strings
-	  ($start) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
-	  ($end) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      # Translate commas in metadata instrument name to semi-colons
+      $instrument =~ s/,/;/g;
 
-	  # Push channel epoch metadata into storage array
-	  push (@metadata, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip");
+      # Cleanup start and end strings
+      ($start) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      ($end) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
 
-	  # Put entry into request hash, value is the widest range of channel epochs
-	  if ( ! exists  $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} ) {
-	    $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$start|$end";
-	  }
-	  else {
-	    # Track widest metadata start and end range
-	    my ($vstart,$vend) = split (/\|/, $request{"$net|$sta|$dloc|$chan|$rstart|$rend"});
-	    $vstart = $start if ( $startepoch < str2time ($vstart) );
-	    $vend = $end if ( $endepoch > str2time ($vend) );
-	    $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$vstart|$vend";
-	  }
-	}
+      # Push channel epoch metadata into storage array
+      push (@metadata, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit");
+
+      # Put entry into request hash, value is the widest range of channel epochs
+      if ( ! exists  $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} ) {
+	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$start|$end";
+      }
+      else {
+	# Track widest metadata start and end range
+	my ($vstart,$vend) = split (/\|/, $request{"$net|$sta|$dloc|$chan|$rstart|$rend"});
+	my $startepoch = str2time ($start);
+	my $endepoch = str2time ($end);
+	$vstart = $start if ( $startepoch < str2time ($vstart) );
+	$vend = $end if ( $endepoch > str2time ($vend) );
+	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$vstart|$vend";
+      }
 
       # Reset Epoch level fields
-      ($start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip) = (undef) x 12;
+      ($start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 13;
+      $inepoch = 0;
     }
 
-    if ( $inchannel && $element->{Name} eq "Azimuth" ) {
-      $inazimuth = 0;
-    }
+    if ( $inepoch && $element->{Name} eq "StartDate" ) { $instart = 0; }
+    if ( $inepoch && $element->{Name} eq "EndDate" ) { $inend = 0; }
+    if ( $inepoch && $element->{Name} eq "Lat" ) { $inlat = 0; }
+    if ( $inepoch && $element->{Name} eq "Lon" ) { $inlon = 0; }
+    if ( $inepoch && $element->{Name} eq "Elevation" ) { $inelevation = 0; }
+    if ( $inepoch && $element->{Name} eq "Depth" ) { $indepth = 0; }
+    if ( $inepoch && $element->{Name} eq "Azimuth" ) { $inazimuth = 0; }
+    if ( $inepoch && $element->{Name} eq "Dip" ) { $indip = 0; }
+    if ( $inepoch && $element->{Name} eq "SampleRate" ) { $insamplerate = 0; }
 
-    if ( $inchannel && $element->{Name} eq "Dip" ) {
-      $indip = 0;
-    }
+    if ( $inepoch && $element->{Name} eq "EquipType" ) { $inequiptype = 0; }
+
+    if ( $inepoch && $element->{Name} eq "Response" ) { $intotalsens = 0; }
+    if ( $intotalsens && $element->{Name} eq "SensitivityValue" ) { $insensvalue = 0; }
+    if ( $intotalsens && $element->{Name} eq "GainUnits" ) { $ingainunits = 0; }
+    if ( $intotalsens && $element->{Name} eq "Frequency" ) { $infrequency = 0; }
   }
 
   sub characters {
     my ($self,$element) = @_;
 
-    if ( $inazimuth ) {
-      $azimuth = $element->{Data};
-    }
+    if ( $instart ) { $start = $element->{Data}; }
+    if ( $inend ) { $end = $element->{Data}; }
+    if ( $inlat ) { $lat = $element->{Data}; }
+    if ( $inlon ) { $lon = $element->{Data}; }
+    if ( $inelevation ) { $elev = $element->{Data}; }
+    if ( $indepth ) { $depth = $element->{Data}; }
+    if ( $inazimuth ) { $azimuth = $element->{Data}; }
+    if ( $indip ) { $dip = $element->{Data}; }
+    if ( $insamplerate ) { $samplerate = $element->{Data}; }
 
-    if ( $indip ) {
-      $dip = $element->{Data};
-    }
+    if ( $inequiptype ) { $instrument = $element->{Data}; }
+
+    if ( $insensvalue ) { $sens = $element->{Data}; }
+    if ( $ingainunits ) { $sensunit = $element->{Data}; }
+    if ( $infrequency ) { $sensfreq = $element->{Data}; }
   }
 } # End of FetchMetaData()
 
@@ -776,3 +751,53 @@ sub sizestring { # sizestring (bytes)
     return "";
   }
 } # End of sizestring()
+
+
+######################################################################
+#
+# Package RequestAgent: a superclass for LWP::UserAgent with override
+# of LWP::UserAgent methods to set default user agent and handle
+# authentication credentials.
+#
+######################################################################
+BEGIN {
+  use LWP;
+  package RequestAgent;
+  our @ISA = qw(LWP::UserAgent);
+
+  sub new
+    {
+      my $self = LWP::UserAgent::new(@_);
+      my $fulluseragent = $useragent;
+      $fulluseragent .= " ($appname)" if ( $appname );
+      $self->agent($fulluseragent);
+      $self;
+    }
+
+  sub get_basic_credentials
+    {
+      my ($self, $realm, $uri) = @_;
+
+      if ( defined $auth ) {
+        return split(':', $auth, 2);
+      }
+      elsif (-t) {
+        my $netloc = $uri->host_port;
+        print "\n";
+        print "Enter username for $realm at $netloc: ";
+        my $user = <STDIN>;
+        chomp($user);
+        return (undef, undef) unless length $user;
+        print "Password: ";
+        system("stty -echo");
+        my $password = <STDIN>;
+        system("stty echo");
+        print "\n";  # because we disabled echo
+        chomp($password);
+        return ($user, $password);
+      }
+      else {
+        return (undef, undef)
+      }
+    }
+} # End of LWP::UserAgent override
