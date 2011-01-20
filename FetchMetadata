@@ -437,6 +437,8 @@ sub FetchMetaData {
     print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
       . $response->code . " :: " . status_message($response->code) . "\n";
     print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+
+    return if ( length $metadataxml <= 0 );
   }
   else {
     print STDERR "\n" if ( $verbose );
