@@ -64,8 +64,7 @@ use Time::HiRes;
 my $version  = "2011.020";
 
 # Web service for metadata
-#my $metadataservice = 'http://www.iris.edu/ws/station/query';
-my $metadataservice = 'http://aram.iris.washington.edu:8080/ws/station/query';
+my $metadataservice = 'http://www.iris.edu/ws/station/query';
 
 # HTTP UserAgent reported to web services
 my $useragent = "FetchMetadata/$version";
