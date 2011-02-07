@@ -122,11 +122,8 @@ sub ParseMetaData {
   my $datasize = (-s "$xmlfile");
 
   # Create stream oriented XML parser instance
-  #use XML::SAX;
-  #my $parser = new XML::SAX::ParserFactory->parser( Handler => MDSHandler->new );
-
-  use XML::SAX::ExpatXS;
-  my $parser = XML::SAX::ExpatXS->new( Handler => MDSHandler->new );
+  use XML::SAX;
+  my $parser = new XML::SAX::ParserFactory->parser( Handler => MDSHandler->new );
 
   my $totalepochs = 0;
 
