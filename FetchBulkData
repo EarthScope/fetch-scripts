@@ -968,24 +968,26 @@ sub FetchMetaData {
       # Trim sensitivity units to short version, they are returned as, e.g. "M/S - Meters per second"
       ($sensunit) = $sensunit =~ /(.*?)\s\-\s.*/ if ( $sensunit );
 
-      # Cleanup start and end strings
-      ($start) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
-      ($end) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      # Cleanup start and end strings, with truncation to 2038-01-01T00:00:00 for older Perls
+      my ($y,$mo,$d,$h,$m,$s) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      my $mstart = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
+      my ($y,$mo,$d,$h,$m,$s) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      my $mend = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
 
       # Push channel epoch metadata into storage array
       push (@metadata, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit");
 
       # Put entry into request hash, value is the widest range of channel epochs
       if ( ! exists  $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} ) {
-	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$start|$end";
+	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$mstart|$mend";
       }
       else {
 	# Track widest metadata start and end range
 	my ($vstart,$vend) = split (/\|/, $request{"$net|$sta|$dloc|$chan|$rstart|$rend"});
-	#my $startepoch = str2time ($start);
-	#my $endepoch = str2time ($end);
-	#$vstart = $start if ( $startepoch < str2time ($vstart) );
-	#$vend = $end if ( $endepoch > str2time ($vend) );
+	my $startepoch = str2time ($mstart);
+	my $endepoch = str2time ($mend);
+	$vstart = $mstart if ( $startepoch < str2time ($vstart) );
+	$vend = $mend if ( $endepoch > str2time ($vend) );
 	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$vstart|$vend";
       }
 
