@@ -10,7 +10,7 @@
 # release 5.10 or newer, older versions of Perl might require the
 # installation of the following modules (and their dependencies):
 #   XML::SAX
-#   Bundle::LWP
+#   Bundle::LWP (libwww-perl)
 #
 # Installation of the XML::SAX::ExpatXS module can significantly
 # speed up the parsing of metadata results returned as XML.
@@ -855,11 +855,12 @@ sub FetchMetaData {
     # Parse XML metadata from file
     $parser->parse_file ($metadataxmlfile);
 
-    # Remove XML metadata file
+    # Remove temporary XML metadata file
     if ( ! unlink $metadataxmlfile ) {
       print STDERR "Cannot remove temporary XML metadata file: $!\n";
     }
   }
+  # Otherwise parse the XML in memory
   else {
     printf STDERR " in memory (possibly slow), " if ( $verbose );
 
@@ -981,10 +982,10 @@ sub FetchMetaData {
       else {
 	# Track widest metadata start and end range
 	my ($vstart,$vend) = split (/\|/, $request{"$net|$sta|$dloc|$chan|$rstart|$rend"});
-	my $startepoch = str2time ($start);
-	my $endepoch = str2time ($end);
-	$vstart = $start if ( $startepoch < str2time ($vstart) );
-	$vend = $end if ( $endepoch > str2time ($vend) );
+	#my $startepoch = str2time ($start);
+	#my $endepoch = str2time ($end);
+	#$vstart = $start if ( $startepoch < str2time ($vstart) );
+	#$vend = $end if ( $endepoch > str2time ($vend) );
 	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$vstart|$vend";
       }
 
