@@ -4,7 +4,13 @@
 #
 # Fetch SEED RESP data from the DMC web interfaces.
 #
-# Installation of the XML::SAX::ExpatXS module will significantly
+# Dependencies: This script should run without problems on Perl
+# release 5.10 or newer, older versions of Perl might require the
+# installation of the following modules (and their dependencies):
+#   XML::SAX
+#   Bundle::LWP (libwww-perl)
+#
+# Installation of the XML::SAX::ExpatXS module can significantly
 # speed up the parsing of metadata results returned as XML.
 #
 # RESP selection
@@ -45,6 +51,13 @@
 #  - Rework metadata parser for changed content (InstrumentSensitivity).
 #  - Add diagnostics and more graceful failure to metadata retrieval.
 #
+# 2011.046
+#  - Save received XML metadata to a temporary file, the PurePerl SAX
+#  XML parser is much faster when working on files.
+#  - Allow comma-separated lists for selection by changing the delimiter
+#  for selection entries.
+#  - Truncate future dates to year 2038 for older versions of HTTP::Date.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -55,7 +68,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2011.020";
+my $version  = "2011.046";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/ws/station/query';
@@ -148,7 +161,7 @@ my @selections = ();
 # Add command line selection to list
 if ( defined $net || defined $sta || defined $loc || defined $chan ||
      defined $starttime || defined $endtime ) {
-  push (@selections,"$net,$sta,$loc,$chan,$starttime,$endtime");
+  push (@selections,"$net|$sta|$loc|$chan|$starttime|$endtime");
 }
 
 # Read selection list file
@@ -178,7 +191,7 @@ my $metadataxml;
 
 # Fetch metadata from the station web service
 foreach my $selection ( @selections ) {
-  my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/,/,$selection);
+  my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
   &FetchMetaData($snet,$ssta,$sloc,$schan,$sstart,$send);
 }
 
@@ -237,7 +250,7 @@ sub ReadSelectFile {
     }
 
     # Add selection to global list
-    push (@selections,"$net,$sta,$loc,$chan,$start,$end");
+    push (@selections,"$net|$sta|$loc|$chan|$start|$end");
   }
 
   close SF;
@@ -359,7 +372,7 @@ sub ReadBFastFile {
 
     # Add selection to global list for each channel
     foreach my $chan ( @chans ) {
-      push (@selections,"$net,$sta,$loc,$chan,$start,$end");
+      push (@selections,"$net|$sta|$loc|$chan|$start|$end");
     }
   }
 
@@ -553,8 +566,28 @@ sub FetchMetaData {
 
   print STDERR "Parsing XML metadata... " if ( $verbose );
 
-  # Parse XML metadata
-  $parser->parse_string ($metadataxml);
+  # Open file to store metadata XML
+  my $metadataxmlfile = "metadata-$$.xml";
+  if ( open (MXML, ">$metadataxmlfile") ) {
+    # Write XML and close file
+    print MXML $metadataxml;
+    close MXML;
+
+    # Parse XML metadata from file
+    $parser->parse_file ($metadataxmlfile);
+
+    # Remove temporary XML metadata file
+    if ( ! unlink $metadataxmlfile ) {
+      print STDERR "Cannot remove temporary XML metadata file: $!\n";
+    }
+  }
+  # Otherwise parse the XML in memory
+  else {
+    printf STDERR " in memory (possibly slow), " if ( $verbose );
+
+    # Parse XML metadata from string
+    $parser->parse_string ($metadataxml);
+  }
 
   printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose );
 
@@ -656,24 +689,26 @@ sub FetchMetaData {
       # Trim sensitivity units to short version, they are returned as, e.g. "M/S - Meters per second"
       ($sensunit) = $sensunit =~ /(.*?)\s\-\s.*/ if ( $sensunit );
 
-      # Cleanup start and end strings
-      ($start) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
-      ($end) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      # Cleanup start and end strings, with truncation to 2038-01-01T00:00:00 for older Perls
+      my ($y,$mo,$d,$h,$m,$s) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      my $mstart = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
+      my ($y,$mo,$d,$h,$m,$s) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      my $mend = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
 
       # Push channel epoch metadata into storage array
       push (@metadata, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit");
 
       # Put entry into request hash, value is the widest range of channel epochs
       if ( ! exists  $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} ) {
-	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$start|$end";
+	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$mstart|$mend";
       }
       else {
 	# Track widest metadata start and end range
 	my ($vstart,$vend) = split (/\|/, $request{"$net|$sta|$dloc|$chan|$rstart|$rend"});
-	my $startepoch = str2time ($start);
-	my $endepoch = str2time ($end);
-	$vstart = $start if ( $startepoch < str2time ($vstart) );
-	$vend = $end if ( $endepoch > str2time ($vend) );
+	my $startepoch = str2time ($mstart);
+	my $endepoch = str2time ($mend);
+	$vstart = $mstart if ( $startepoch < str2time ($vstart) );
+	$vend = $mend if ( $endepoch > str2time ($vend) );
 	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$vstart|$vend";
       }
 

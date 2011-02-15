@@ -4,7 +4,13 @@
 #
 # Fetch metadata from the DMC web interfaces.
 #
-# Installation of the XML::SAX::ExpatXS module will significantly
+# Dependencies: This script should run without problems on Perl
+# release 5.10 or newer, older versions of Perl might require the
+# installation of the following modules (and their dependencies):
+#   XML::SAX
+#   Bundle::LWP (libwww-perl)
+#
+# Installation of the XML::SAX::ExpatXS module can significantly
 # speed up the parsing of metadata results returned as XML.
 #
 # Metadata selection
@@ -51,12 +57,11 @@
 #  - Rework metadata parser for changed content (InstrumentSensitivity).
 #  - Add diagnostics and more graceful failure to metadata retrieval.
 #
-# 2011.042
+# 2011.046
 #  - Save received XML metadata to a temporary file, the PurePerl SAX
 #  XML parser is much faster when working on files.
-
-#CHAD, need to actually code this below
-
+#  - Allow comma-separated lists for selection by changing the delimiter
+#  for selection entries.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -68,7 +73,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2011.020";
+my $version  = "2011.046";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/ws/station/query';
@@ -154,7 +159,7 @@ my @selections = ();
 # Add command line selection to list
 if ( defined $net || defined $sta || defined $loc || defined $chan ||
      defined $starttime || defined $endtime ) {
-  push (@selections,"$net,$sta,$loc,$chan,$starttime,$endtime");
+  push (@selections,"$net|$sta|$loc|$chan|$starttime|$endtime");
 }
 
 # Read selection list file
@@ -184,7 +189,7 @@ my $datasize;
 
 # Fetch metadata from the station web service
 foreach my $selection ( @selections ) {
-  my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/,/,$selection);
+  my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
   &FetchMetaData($snet,$ssta,$sloc,$schan,$sstart,$send);
 }
 
@@ -273,7 +278,7 @@ sub ReadSelectFile {
     }
 
     # Add selection to global list
-    push (@selections,"$net,$sta,$loc,$chan,$start,$end");
+    push (@selections,"$net|$sta|$loc|$chan|$start|$end");
   }
 
   close SF;
@@ -395,7 +400,7 @@ sub ReadBFastFile {
 
     # Add selection to global list for each channel
     foreach my $chan ( @chans ) {
-      push (@selections,"$net,$sta,$loc,$chan,$start,$end");
+      push (@selections,"$net|$sta|$loc|$chan|$start|$end");
     }
   }
 
@@ -484,8 +489,30 @@ sub FetchMetaData {
 
   print STDERR "Parsing XML metadata... " if ( $verbose );
 
-  # Parse XML metadata
-  $parser->parse_string ($metadataxml);
+  # Open file to store metadata XML
+  my $metadataxmlfile = ( $xmlfile ) ? $xmlfile : "metadata-$$.xml";
+  if ( open (MXML, ">$metadataxmlfile") ) {
+    # Write XML and close file
+    print MXML $metadataxml;
+    close MXML;
+
+    # Parse XML metadata from file
+    $parser->parse_file ($metadataxmlfile);
+
+    # Remove temporary XML metadata file
+    if ( ! defined $xmlfile ) {
+      if ( ! unlink $metadataxmlfile ) {
+	print STDERR "Cannot remove temporary XML metadata file: $!\n";
+      }
+    }
+  }
+  # Otherwise parse the XML in memory
+  else {
+    printf STDERR " in memory (possibly slow), " if ( $verbose );
+
+    # Parse XML metadata from string
+    $parser->parse_string ($metadataxml);
+  }
 
   printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose );
 
