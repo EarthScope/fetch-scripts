@@ -58,6 +58,7 @@
 #  - Add diagnostics and more graceful failure to metadata retrieval.
 #
 # 2011.046
+#  - Add -ua option to limit results to data updated after a date.
 #  - Save received XML metadata to a temporary file, the PurePerl SAX
 #  XML parser is much faster when working on files.
 #  - Allow comma-separated lists for selection by changing the delimiter
@@ -81,38 +82,40 @@ my $metadataservice = 'http://www.iris.edu/ws/station/query';
 # HTTP UserAgent reported to web services
 my $useragent = "FetchMetadata/$version";
 
-my $usage      = undef;
-my $verbose    = undef;
+my $usage        = undef;
+my $verbose      = undef;
 
-my $net        = undef;
-my $sta        = undef;
-my $loc        = undef;
-my $chan       = undef;
-my $starttime  = undef;
-my $endtime    = undef;
-my $selectfile = undef;
-my $bfastfile  = undef;
-my $appname    = undef;
-my $auth       = undef;
-my $outfile    = undef;
-my $xmlfile    = undef;
+my $net          = undef;
+my $sta          = undef;
+my $loc          = undef;
+my $chan         = undef;
+my $starttime    = undef;
+my $endtime      = undef;
+my $updatedafter = undef;
+my $selectfile   = undef;
+my $bfastfile    = undef;
+my $appname      = undef;
+my $auth         = undef;
+my $outfile      = undef;
+my $xmlfile      = undef;
 
 # Parse command line arguments
 Getopt::Long::Configure ("bundling_override");
-my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
-                              'verbose|v+'     => \$verbose,
-                              'net|N=s'        => \$net,
-                              'sta|S=s'        => \$sta,
-                              'loc|L=s'        => \$loc,
-                              'chan|C=s'       => \$chan,
-			      'starttime|s=s'  => \$starttime,
-			      'endtime|e=s'    => \$endtime,
-			      'selectfile|l=s' => \$selectfile,
-			      'bfastfile|b=s'  => \$bfastfile,
-			      'appname|A=s'    => \$appname,
-			      'auth|a=s'       => \$auth,
-			      'outfile|o=s'    => \$outfile,
-			      'xmlfile|X=s'    => \$xmlfile,
+my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
+                              'verbose|v+'        => \$verbose,
+                              'net|N=s'           => \$net,
+                              'sta|S=s'           => \$sta,
+                              'loc|L=s'           => \$loc,
+                              'chan|C=s'          => \$chan,
+			      'starttime|s=s'     => \$starttime,
+			      'endtime|e=s'       => \$endtime,
+			      'updatedafter|ua=s' => \$updatedafter,
+			      'selectfile|l=s'    => \$selectfile,
+			      'bfastfile|b=s'     => \$bfastfile,
+			      'appname|A=s'       => \$appname,
+			      'auth|a=s'          => \$auth,
+			      'outfile|o=s'       => \$outfile,
+			      'xmlfile|X=s'       => \$xmlfile,
 			    );
 
 my $required =  ( defined $net || defined $sta ||
@@ -132,6 +135,8 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -C,--chan         Channel codes, default is all\n";
   print " -s starttime      Specify start time (YYYY/MM/DD HH:MM:SS)\n";
   print " -e endtime        Specify end time (YYYY/MM/DD HH:MM:SS)\n";
+  print " -ua date          Limit to metadata updated after date (YYYY/MM/DD)\n";
+  print " -X xmlfile        Write raw returned XML to xmlfile\n";
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
   print " -A appname        Application/version string for identification\n";
@@ -151,6 +156,11 @@ if ( $starttime ) {
 if ( $endtime ) {
   my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $endtime);
   $endtime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+}
+
+if ( $updatedafter ) {
+  my ($year,$month,$mday) = split (/[-:,.\s\/T]/, $updatedafter);
+  $updatedafter = sprintf ("%04d-%02d-%02d", $year, $month, $mday);
 }
 
 # An array to hold data selections
@@ -224,17 +234,6 @@ if ( $metafile ) {
 
     close META;
   }
-}
-
-# Write XML metadata to file
-if ( $xmlfile && length $metadataxml > 0 ) {
-  printf STDERR "Writing raw XML metadata to $xmlfile\n" if ( $verbose );
-
-  open (XMLF, ">$xmlfile") || die "Cannot open XML output file '$xmlfile': $!\n";
-
-  print XMLF $metadataxml;
-
-  close XMLF;
 }
 
 print STDERR "DONE\n";
@@ -445,6 +444,7 @@ sub FetchMetaData {
 
     $uri .= "&timewindow=${startdate},${enddate}";
   }
+  $uri .= "&updatedafter=$updatedafter" if ( $updatedafter );
 
   my $ftime = Time::HiRes::time;
 
