@@ -74,7 +74,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2011.046";
+my $version  = "2011.046b";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/ws/station/query';
@@ -133,9 +133,9 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -S,--sta          Station code, default is all\n";
   print " -L,--loc          Location ID, default is all\n";
   print " -C,--chan         Channel codes, default is all\n";
-  print " -s starttime      Specify start time (YYYY/MM/DD HH:MM:SS)\n";
-  print " -e endtime        Specify end time (YYYY/MM/DD HH:MM:SS)\n";
-  print " -ua date          Limit to metadata updated after date (YYYY/MM/DD)\n";
+  print " -s starttime      Specify start time (YYYY-MM-DD,HH:MM:SS)\n";
+  print " -e endtime        Specify end time (YYYY-MM-DD,HH:MM:SS)\n";
+  print " -ua date          Limit to metadata updated after date (YYYY-MM-DD)\n";
   print " -X xmlfile        Write raw returned XML to xmlfile\n";
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
