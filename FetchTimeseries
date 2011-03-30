@@ -59,6 +59,9 @@
 #  - Rework metadata parser for changed content (InstrumentSensitivity).
 #  - Add diagnostics and more graceful failure to metadata retrieval.
 #
+# 2011.089
+#  - Fix error message to report unrecognized channels in BREQ_FAST files.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -69,7 +72,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2011.020";
+my $version  = "2011.089";
 
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/ws/station/query';
@@ -398,7 +401,7 @@ sub ReadBFastFile {
 
     foreach my $chan ( @chans ) {
       if ( $chan !~ /^[A-Za-z0-9*?]{3,3}$/ ) {
-	print "Unrecognized location ID: '$loc', skipping line $linecount\n" if ( $verbose );
+	print "Unrecognized channel codes: '$chan', skipping line $linecount\n" if ( $verbose );
 	next BFLINE;
       }
     }
