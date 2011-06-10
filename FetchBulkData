@@ -230,7 +230,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -msl length       Limit returned data to a minimum segment length\n";
   print " -lso              Limit returned data to the longest segment only\n";
   print " -A appname        Application/version string for identification\n";
-  print " -a user:pass      User and password when authentication is needed\n";
+#  print " -a user:pass      User and password when authentication is needed\n";
   print "\n";
   print " -o outfile        Fetch waveform data and write to output file\n";
   print " -sd sacpzdir      Fetch SAC P&Zs and write files to sacpzdir\n";

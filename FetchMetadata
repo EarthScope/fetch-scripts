@@ -86,7 +86,7 @@ my $version  = "2011.089";
 my $metadataservice = 'http://www.iris.edu/ws/station/query';
 
 # HTTP UserAgent reported to web services
-my $useragent = "FetchEvent/$version Perl/$] " . new LWP::UserAgent->_agent;
+my $useragent = "FetchMetadata/$version Perl/$] " . new LWP::UserAgent->_agent;
 
 my $usage        = undef;
 my $verbose      = undef;
