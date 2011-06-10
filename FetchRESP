@@ -139,7 +139,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
   print " -A appname        Application/version string for identification\n";
-  print " -a user:pass      User and password when authentication is needed\n";
+#  print " -a user:pass      User and password when authentication is needed\n";
   print "\n";
   print " -rd respdir       Write files to respdir, default is current directory\n";
   print "\n";
