@@ -128,6 +128,9 @@
 # 2011.089
 #  - Fix error message to report unrecognized channels in BREQ_FAST files.
 #
+# 2011.161
+#  - Add Perl and LWP version to UserAgent and wsclient URL to usage message
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -153,7 +156,7 @@ my $sacpzservice = 'http://www.iris.edu/ws/sacpz/query';
 my $respservice = 'http://www.iris.edu/ws/resp/query';
 
 # HTTP UserAgent reported to web services
-my $useragent = "FetchBulkData/$version";
+my $useragent = "FetchEvent/$version Perl/$] " . new LWP::UserAgent->_agent;
 
 my $usage      = undef;
 my $verbose    = undef;
@@ -210,7 +213,8 @@ my $required =  ( defined $net || defined $sta ||
 
 if ( ! $getoptsret || $usage || ! $required ) {
   my $script = basename($0);
-  print "$script: collect waveform data from the IRIS DMC (version $version)\n\n";
+  print "$script: collect waveform data from the IRIS DMC (version $version)\n";
+  print "http://www.iris.edu/ws/wsclients/\n\n";
   print "Usage: $script [options]\n\n";
   print " Options:\n";
   print " -v                Increase verbosity, may be specified multiple times\n";
