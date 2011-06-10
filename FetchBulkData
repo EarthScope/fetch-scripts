@@ -156,7 +156,7 @@ my $sacpzservice = 'http://www.iris.edu/ws/sacpz/query';
 my $respservice = 'http://www.iris.edu/ws/resp/query';
 
 # HTTP UserAgent reported to web services
-my $useragent = "FetchEvent/$version Perl/$] " . new LWP::UserAgent->_agent;
+my $useragent = "FetchBulkData/$version Perl/$] " . new LWP::UserAgent->_agent;
 
 my $usage      = undef;
 my $verbose    = undef;

@@ -83,7 +83,7 @@ my $metadataservice = 'http://www.iris.edu/ws/station/query';
 my $sacpzservice = 'http://www.iris.edu/ws/sacpz/query';
 
 # HTTP UserAgent reported to web services
-my $useragent = "FetchEvent/$version Perl/$] " . new LWP::UserAgent->_agent;
+my $useragent = "FetchSACPZ/$version Perl/$] " . new LWP::UserAgent->_agent;
 
 my $usage      = undef;
 my $verbose    = undef;
