@@ -128,7 +128,8 @@
 # 2011.089
 #  - Fix error message to report unrecognized channels in BREQ_FAST files.
 #
-# 2011.161
+# 2011.162
+#  - Request data in limited groups and restart waveform requests on errors.
 #  - Add Perl and LWP version to UserAgent and wsclient URL to usage message.
 #  - Print script name and local time when verbose.
 #  - Allow quality in BREQ_FAST to be E.
@@ -143,7 +144,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.089";
+my $version = "2011.162";
 
 my $scriptname = basename($0);
 
@@ -263,7 +264,7 @@ if ( $outfile && ( ! defined $selectfile && ! defined $bfastfile &&
   die "Cannot request waveform data without start and end times\n";
 }
 
-# Normalize time strings
+# Normalize time strings given on the command line
 if ( $starttime ) {
   my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $starttime);
   $starttime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
@@ -314,7 +315,7 @@ foreach my $selection ( @selections ) {
   &FetchMetaData($snet,$ssta,$sloc,$schan,$sstart,$send);
 }
 
-# Report complete data requests
+# Report complete data request
 if ( $verbose > 2 ) {
   print STDERR "== Request list ==\n";
   foreach my $req ( sort keys %request ) {
@@ -557,52 +558,82 @@ sub FetchWaveformData {
 
   my $count = 0;
 
-  print STDERR "Fetching waveform data\n" if ( $verbose );
-  my $ftime = Time::HiRes::time;
-  my $totalbytes = 0;
+  # Determine request data groups to avoid single large requests
+  my @grouprequest = ();
+  my $minstadays = 30;
 
-  # Create web service URI
-  my $uri = "${waveformservice}";
-
-  # Create POST data selection: specify options followed by selections
-  my $postdata = "quality $qual\n";
-  $postdata .= "minimumlength=$mslopt\n" if ( defined $mslopt );
-  $postdata .= "longestonly=true\n" if ( defined $lsoopt );
-
+  my $groupdays = 0;
+  my $groupidx = 0;
   foreach my $req ( sort keys %request ) {
     my ($wnet,$wsta,$wloc,$wchan,$wstart,$wend) = split (/\|/, $req);
     $count++;
-
-    $postdata .= "$wnet $wsta $wloc $wchan $wstart $wend\n";
+    
+    # Determine day coverage for this request
+    my $rstartepoch = str2time ($wstart);
+    my $rendepoch = str2time ($wend);
+    $groupdays += int ((($rendepoch - $rstartepoch) / 86400.0) + 0.5);
+    
+    # Add request to current group
+    push (@{$grouprequest[$groupidx]}, "$wnet $wsta $wloc $wchan $wstart $wend");
+    
+    # If beyond minstadays move to the next group
+    if ( $groupdays > $minstadays ) {
+      $groupdays = 0;
+      $groupidx++;
+    }
   }
-
+  
   if ( ! $count ) {
     print STDERR "No data selections to request\n";
     return;
   }
 
-  print STDERR "Waveform URI: '$uri'\n" if ( $verbose > 1 );
-  print STDERR "Data selection (POST):\n$postdata" if ( $verbose > 1 );
+  print STDERR "Fetching waveform data\n" if ( $verbose );
+  my $ftime = Time::HiRes::time;
+  my $totalbytes = 0;
 
-  print STDERR "Downloading waveform data ($count selections) :: Received " if ( $verbose );
+  # Loop over data groups
+  my $groupidx = 0;
+  my $groupcnt = scalar @grouprequest;
+  foreach my $groupref ( @grouprequest ) {
+    $groupidx++;
 
-  $datasize = 0;
+    # Create web service URI
+    my $uri = "${waveformservice}";
 
-  # Fetch waveform data from web service using callback routine
-  my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack );
-
-  if ( $response->code == 404 ) {
-    print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+    # Create POST data selection: specify options followed by selections
+    my $postdata = "quality $qual\n";
+    $postdata .= "minimumlength=$mslopt\n" if ( defined $mslopt );
+    $postdata .= "longestonly=true\n" if ( defined $lsoopt );
+    
+    foreach my $req ( @{$groupref} ) {
+      $postdata .= "$req\n";
+    }
+    
+    print STDERR "Waveform URI: '$uri'\n" if ( $verbose > 1 );
+    print STDERR "Data selection (POST):\n$postdata" if ( $verbose > 1 );
+    
+CHAD, print current group of total
+    print STDERR "Downloading waveform data ($count selections) :: Received " if ( $verbose );
+    
+    $datasize = 0;
+    
+    # Fetch waveform data from web service using callback routine
+    my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack );
+    
+    if ( $response->code == 404 ) {
+      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+    }
+    elsif ( ! $response->is_success() ) {
+      print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
+	  . $response->code . " :: " . status_message($response->code) . "\n";
+      print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+    }
+    else {
+      print STDERR "\n" if ( $verbose );
+    }
   }
-  elsif ( ! $response->is_success() ) {
-    print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
-      . $response->code . " :: " . status_message($response->code) . "\n";
-    print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
-  }
-  else {
-    print STDERR "\n" if ( $verbose );
-  }
-
+  
   close OUT;
 
   my $duration = Time::HiRes::time - $ftime;
