@@ -63,6 +63,7 @@
 #
 # 2011.161
 #  - Add Perl and LWP version to UserAgent and wsclient URL to usage message
+#  - Print script name and local time when verbose
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -76,6 +77,8 @@ use Time::HiRes;
 
 my $version  = "2011.089";
 
+my $scriptname = basename($0);
+
 # Web service for metadata
 my $metadataservice = 'http://www.iris.edu/ws/station/query';
 
@@ -83,7 +86,7 @@ my $metadataservice = 'http://www.iris.edu/ws/station/query';
 my $respservice = 'http://www.iris.edu/ws/resp/query';
 
 # HTTP UserAgent reported to web services
-my $useragent = "FetchRESP/$version Perl/$] " . new LWP::UserAgent->_agent;
+my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
 
 my $usage      = undef;
 my $verbose    = undef;
@@ -124,10 +127,9 @@ my $required =  ( defined $net || defined $sta ||
 		  defined $selectfile || defined $bfastfile );
 
 if ( ! $getoptsret || $usage || ! $required ) {
-  my $script = basename($0);
-  print "$script: collect SEED RESP from the IRIS DMC (version $version)\n";
+  print "$scriptname: collect SEED RESP from the IRIS DMC (version $version)\n";
   print "http://www.iris.edu/ws/wsclients/\n\n";
-  print "Usage: $script [options]\n\n";
+  print "Usage: $scriptname [options]\n\n";
   print " Options:\n";
   print " -v                Increase verbosity, may be specified multiple times\n";
   print " -N,--net          Network code, default is all\n";
@@ -144,6 +146,12 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -rd respdir       Write files to respdir, default is current directory\n";
   print "\n";
   exit 1;
+}
+
+# Print script name and local time string
+if ( $verbose ) {
+  my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+  printf STDERR "$scriptname ($version) at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec;
 }
 
 # Check for existence of output directories

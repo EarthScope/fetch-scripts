@@ -1,0 +1,605 @@
+#!/usr/bin/perl
+#
+# FetchEvent
+#
+# Fetch event parameters from the DMC web interfaces.
+#
+# Dependencies: This script should run without problems on Perl
+# release 5.10 or newer, older versions of Perl might require the
+# installation of the following modules (and their dependencies):
+#   XML::SAX
+#   Bundle::LWP (libwww-perl)
+#
+# Installation of the XML::SAX::ExpatXS module can significantly
+# speed up the parsing of results returned as XML.
+#
+# ## Change history ##
+#
+# 2011.161:
+#  - Initial version.
+#
+# Author: Chad Trabant, IRIS Data Managment Center
+
+use strict;
+use File::Basename;
+use Getopt::Long;
+use LWP::UserAgent;
+use HTTP::Status qw(status_message);
+use HTTP::Date;
+use Time::HiRes;
+
+my $version = "2011.161";
+
+my $scriptname = basename($0);
+
+# Web service for metadata
+my $eventservice = 'http://www.iris.edu/ws/event/query';
+
+# HTTP UserAgent reported to web services
+my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
+
+my $usage        = undef;
+my $verbose      = undef;
+
+my $starttime    = undef;
+my $endtime      = undef;
+my $minlat       = undef;
+my $maxlat       = undef;
+my $minlon       = undef;
+my $maxlon       = undef;
+my $mindepth     = undef;
+my $maxdepth     = undef;
+my $minmag       = undef;
+my $maxmag       = undef;
+
+my $catalog      = undef;
+my $contributor  = undef;
+my $updatedafter = undef;
+my $secondary    = undef;
+my $orderbymag   = undef;
+my $limit        = undef;
+
+my $eventid      = undef;
+my $originid     = undef;
+
+my $appname      = undef;
+my $auth         = undef;
+my $outfile      = undef;
+my $xmlfile      = undef;
+
+my $eventxml     = undef;
+
+# Parse command line arguments
+Getopt::Long::Configure ("bundling_override");
+my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
+                              'verbose|v+'        => \$verbose,
+
+			      'starttime|s=s'     => \$starttime,
+			      'endtime|e=s'       => \$endtime,
+
+                              'minlat=s'          => \$minlat,
+                              'maxlat=s'          => \$maxlat,
+                              'minlon=s'          => \$minlon,
+                              'maxlon=s'          => \$maxlon,
+                              'mindepth=s'        => \$mindepth,
+                              'maxdepth=s'        => \$maxdepth,
+                              'minmag=s'          => \$minmag,
+                              'maxmag=s'          => \$maxmag,
+
+                              'catalog|cat=s'     => \$catalog,
+                              'contributor|con=s' => \$contributor,
+			      'updatedafter|ua=s' => \$updatedafter,
+                              'secondary'         => \$secondary,
+			      'orderbymag'        => \$orderbymag,
+                              'limit|l=s'         => \$limit,
+
+			      'eventid|evid=s'    => \$eventid,
+			      'originid|orid=s'   => \$originid,
+
+			      'appname|A=s'       => \$appname,
+			      'auth|a=s'          => \$auth,
+			      'outfile|o=s'       => \$outfile,
+			      'xmlfile|X=s'       => \$xmlfile,
+			      'eventurl=s'        => \$eventservice,
+			    );
+
+my $required =  ( defined $starttime || defined $endtime ||
+                  defined $minlat || defined $maxlat ||
+                  defined $minlon || defined $maxlon ||
+                  defined $mindepth || defined $maxdepth ||
+                  defined $minmag || defined $maxmag ||
+                  defined $catalog || defined $contributor ||
+                  defined $eventid || defined $originid );
+
+if ( ! $getoptsret || $usage || ! $required ) {
+  print "$scriptname: collect event information from the IRIS DMC ($version)\n";
+  print "http://www.iris.edu/ws/wsclients/\n\n";
+  print "Usage: $scriptname [options]\n\n";
+  print " Options:\n";
+  print " -v                Increase verbosity, may be specified multiple times\n";
+  print "\n";
+  print " -s starttime      Limit to origins after time (YYYY-MM-DD,HH:MM:SS)\n";
+  print " -e endtime        Limit to origins before time (YYYY-MM-DD,HH:MM:SS)\n";
+  print " --minlat lat      Minimum latitude (-90 to 90)\n";
+  print " --maxlat lat      Maximum latitude (-90 to 90)\n";
+  print " --minlon lon      Minimum longitude (-180 to 180)\n";
+  print " --maxlon lon      Maximum longitude (-180 to 180)\n";
+  print " --mindepth depth  Minimum depth in kilometers\n";
+  print " --maxdepth depth  Maximum depth in kilometers\n";
+  print " --minmag mag      Minimum magnitude\n";
+  print " --maxmag mag      Maximum magnitude\n";
+  print " --cat name        Limit to origins from specific catalog (e.g. ISC)\n";
+  print " --con name        Limit to origins from specific contributor (e.g. NEIC)\n";
+  print " --ua date         Limit to origins updated after date (YYYY-MM-DD)\n";
+  print "\n";
+  print " --secondary       Return secondary origins, default is only primary origins\n";
+  print " --orderbymag      Order results by magnitude instead of time\n";
+  print " --limit #         Set limit of return results\n";
+
+  print "\n";
+  print " --evid id         Select a specific event by DMC event ID\n";
+  print " --orid id         Select a specific event by DMC origin ID\n";
+  print "\n";
+  print " -X xmlfile        Write raw returned XML to xmlfile\n";
+  print " -A appname        Application/version string for identification\n";
+#  print " -a user:pass      User and password when authentication is needed\n";
+  print "\n";
+  print " -o outfile        Write event information to specified file instead of printing\n";
+  print "\n";
+  exit 1;
+}
+
+# Print script name and local time string
+if ( $verbose ) {
+  my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+  printf STDERR "$scriptname ($version) at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec;
+}
+
+# Normalize time strings
+if ( $starttime ) {
+  my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $starttime);
+  $starttime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+}
+
+if ( $endtime ) {
+  my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $endtime);
+  $endtime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+}
+
+if ( $updatedafter ) {
+  my ($year,$month,$mday) = split (/[-:,.\s\/T]/, $updatedafter);
+  $updatedafter = sprintf ("%04d-%02d-%02d", $year, $month, $mday);
+}
+
+# Containers to hold event, origin and magnitude details
+my @eventids = ();
+my %eventname = ();
+my %origins = ();
+my %mags = ();
+
+my $datasize;
+
+# Fetch events from the web service
+&FetchEvents();
+
+# Write to either specified output file or stdout
+my $eventfile = ( $outfile ) ? $outfile : "-";
+
+# Write event information to file
+if ( $eventfile ) {
+  if ( scalar @eventids <= 0 ) {
+    printf STDERR "No events selected\n", scalar @eventids;
+  }
+  else {
+    printf STDERR "Writing event file (%d)\n", scalar @eventids if ( $verbose );
+
+    open (EVENT, ">$eventfile") || die "Cannot open event file '$eventfile': $!\n";
+
+    foreach my $eventid ( @eventids ) {
+      print EVENT "$eventid - $eventname{$eventid}\n";
+
+      foreach my $origin ( @{$origins{$eventid}} ) {
+	print EVENT "  $origin\n";
+      }
+
+      foreach my $mag ( @{$mags{$eventid}} ) {
+	print EVENT "  $mag\n";
+      }
+
+    }
+
+    close EVENT;
+  }
+}
+
+print STDERR "DONE\n";
+## End of main
+
+
+######################################################################
+# FetchEvents:
+#
+# Collect event information for selected data set.
+#
+# Resulting information is placed in the following global structures:
+#   @eventids - an array containing the returned event IDs in order
+#   %eventname
+#   %origins
+#   %mags
+#
+######################################################################
+sub FetchEvents {
+
+  # Create HTTP user agent
+  my $ua = RequestAgent->new();
+
+  # Create web service URI
+  my $uri = "${eventservice}?";
+  $uri .= "orderby="; $uri .= ($orderbymag) ? "magnitude" : "time";
+  if ( $starttime && $endtime ) {
+    $uri .= "&timewindow=${starttime},${endtime}";
+  }
+  $uri .= "&minlat=$minlat" if ( $minlat );
+  $uri .= "&maxlat=$maxlat" if ( $maxlat );
+  $uri .= "&minlon=$minlon" if ( $minlon );
+  $uri .= "&maxlon=$maxlon" if ( $maxlon );
+  $uri .= "&mindepth=$mindepth" if ( $mindepth );
+  $uri .= "&maxdepth=$maxdepth" if ( $maxdepth );
+  $uri .= "&minmag=$minmag" if ( $minmag );
+  $uri .= "&maxmag=$maxmag" if ( $maxmag );
+
+  $uri .= "&catalog=$catalog" if ( $catalog );
+  $uri .= "&contributor=$contributor" if ( $contributor );
+  $uri .= "&updatedafter=$updatedafter" if ( $updatedafter );
+  $uri .= "&preferredOnly=no" if ( $secondary );
+  $uri .= "&limit=$limit" if ( $limit );
+
+  $uri .= "&eventId=$eventid" if ( $eventid );
+  $uri .= "&originId=$originid" if ( $originid );
+
+  my $ftime = Time::HiRes::time;
+
+  print STDERR "Event URI: '$uri'\n" if ( $verbose > 1 );
+
+  print STDERR "Fetching event information :: Received " if ( $verbose );
+
+  $datasize = 0;
+  $eventxml = "";
+
+  # Fetch event information from web service using callback routine
+  my $response = $ua->get($uri, ':content_cb' => \&EDCallBack );
+
+  if ( $response->code == 404 ) {
+    print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+    return;
+  }
+  elsif ( ! $response->is_success() ) {
+    print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
+      . $response->code . " :: " . status_message($response->code) . "\n";
+    print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+  }
+  else {
+    print STDERR "\n" if ( $verbose );
+  }
+
+  my $duration = Time::HiRes::time - $ftime;
+  my $rate = $datasize/(($duration)?$duration:0.000001);
+  printf (STDERR "Received %s of event information in %.1f seconds (%s/s)\n",
+	  sizestring($datasize), $duration, sizestring($rate));
+
+  # Return if no metadata received
+  return if ( length $eventxml <= 0 );
+
+  # Create stream oriented XML parser instance
+  use XML::SAX;
+  my $parser = new XML::SAX::ParserFactory->parser( Handler => ESHandler->new );
+
+  my $totalevents = 0;
+  my $totalorigins = 0;
+
+  my $ptime = Time::HiRes::time;
+
+  print STDERR "Parsing XML event data... " if ( $verbose );
+
+  # Open file to store event XML
+  my $eventxmlfile = ( $xmlfile ) ? $xmlfile : "eventdata-$$.xml";
+  if ( open (EXML, ">$eventxmlfile") ) {
+    # Write XML and close file
+    print EXML $eventxml;
+    close EXML;
+
+    # Parse XML from file
+    $parser->parse_file ($eventxmlfile);
+
+    # Remove temporary XML file
+    if ( ! defined $xmlfile ) {
+      if ( ! unlink $eventxmlfile ) {
+	print STDERR "Cannot remove temporary XML file: $!\n";
+      }
+    }
+  }
+  # Otherwise parse the XML in memory
+  else {
+    printf STDERR " in memory (possibly slow), " if ( $verbose );
+
+    # Parse XML event data from string
+    $parser->parse_string ($eventxml);
+  }
+
+  printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose );
+
+  my $duration = Time::HiRes::time - $ftime;
+  my $rate = $datasize/(($duration)?$duration:0.000001);
+  printf (STDERR "Processed event information for $totalevents events, $totalorigins origins in %.1f seconds (%s/s)\n",
+	  $duration, sizestring($rate));
+
+  ## End of this routine, below is the XML parsing handler used above
+
+  ## Beginning of SAX ESHandler, event-based streaming XML parsing
+  package ESHandler;
+  use base qw(XML::SAX::Base);
+  use HTTP::Date;
+
+  my $inevent = 0;
+  my $inpreferredOriginID = 0;
+  my $indescription = 0;
+  my $intext = 0;
+  my $invalue = 0;
+
+  my $inorigin = 0;
+  my $intime = 0;
+  my $inlat = 0;
+  my $inlon = 0;
+  my $indepth = 0;
+  my $increationInfo = 0;
+  my $inauthor = 0;
+
+  my $inmagnitude = 0;
+  my $inmag = 0;
+  my $intype = 0;
+
+  my $name = undef;
+
+  my ($name,$eventid,$originid,$magnitudeid,$porigin,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$mag,$magtype,$magauthor) = (undef) x 15;
+
+  sub start_element {
+    my ($self,$element) = @_;
+
+    if ( $element->{Name} eq "event" ) {
+      ($name,$eventid,$originid,$magnitudeid,$porigin,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$mag,$magtype,$magauthor) = (undef) x 15;
+
+      my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
+      ($eventid) = $publicid =~ /.*eventId\=(\d+)$/;
+
+      $inevent = 1;
+    }
+
+    if ( $inevent ) {
+      if ( $element->{Name} eq "preferredOriginID" ) { $inpreferredOriginID = 1; }
+      elsif ( $element->{Name} eq "description" ) { $indescription = 1; }
+
+      if ( $indescription && $element->{Name} eq "text" ) { $intext = 1; }
+
+      if ( $element->{Name} eq "origin" ) {
+	my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
+	($originid) = $publicid =~ /.*originId\=(\d+)$/;
+
+	# Search for catalog and contributor from any namespace
+	foreach my $key (keys %{$element->{Attributes}}) {
+          $catalog = $element->{Attributes}->{$key}->{Value} if ( $key =~ /^\{.*\}catalog$/ );
+          $contributor = $element->{Attributes}->{$key}->{Value} if ( $key =~ /^\{.*\}contributor$/ );
+	}
+
+	$inorigin = 1;
+      }
+
+      if ( $element->{Name} eq "magnitude" ) {
+	my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
+	($magnitudeid) = $publicid =~ /.*magnitudeId\=(\d+)$/;
+
+	$inmagnitude = 1;
+      }
+    }
+
+    if ( $inorigin ) {
+      if ( $element->{Name} eq "time" ) { $intime = 1; }
+      elsif ( $element->{Name} eq "latitude" ) { $inlat = 1; }
+      elsif ( $element->{Name} eq "longitude" ) { $inlon = 1; }
+      elsif ( $element->{Name} eq "depth" ) { $indepth = 1; }
+      elsif ( $element->{Name} eq "creationInfo" ) { $increationInfo = 1; }
+
+      if ( ($intime || $inlat || $inlon || $indepth || $increationInfo) && $element->{Name} eq "value" ) { $invalue = 1; }
+      if ( $increationInfo && $element->{Name} eq "author" ) { $inauthor = 1; }
+    }
+
+    if ( $inmagnitude ) {
+      if ( $element->{Name} eq "mag" ) { $inmag = 1; }
+      elsif ( $element->{Name} eq "type" ) { $intype = 1; }
+      elsif ( $element->{Name} eq "creationInfo" ) { $increationInfo = 1; }
+
+      if ( $inmag && $element->{Name} eq "value" ) { $invalue = 1; }
+      if ( $increationInfo && $element->{Name} eq "author" ) { $inauthor = 1; }
+    }
+  }
+
+  sub end_element {
+    my ($self,$element) = @_;
+
+    if ( $element->{Name} eq "event" ) {
+      push (@eventids, $eventid);
+
+      $eventname{$eventid} = "$name|$porigin";
+      $totalevents++;
+
+      ($name,$eventid,$porigin) = (undef) x 3;
+      $inevent = 0;
+    }
+
+    if ( $inevent ) {
+      if ( $element->{Name} eq "preferredOriginID" ) {
+	($porigin) = $porigin =~ /.*originId\=(\d+)$/; # Trim preferred origin ID to value
+	$inpreferredOriginID = 0;
+      }
+      elsif ( $element->{Name} eq "description" ) { $indescription = 0; }
+
+      if ( $indescription && $element->{Name} eq "text" ) { $intext = 0; }
+
+      if ( $element->{Name} eq "origin" ) {
+	push (@{$origins{$eventid}}, "$originid,$time,$lat,$lon,$depth,$author,$catalog,$contributor");
+        $totalorigins++;
+	
+	($originid,$catalog,$contributor,$time,$lat,$lon,$depth,$author) = (undef) x 8;
+	$inorigin = 0;
+      }
+
+      if ( $element->{Name} eq "magnitude" ) {
+	push (@{$mags{$eventid}}, "$magnitudeid,$mag,$magtype,$magauthor");
+
+	($magnitudeid,$mag,$magtype,$magauthor) = (undef) x 4;
+	$inmagnitude = 0;
+      }
+    }
+
+    if ( $inorigin ) {
+      if ( $element->{Name} eq "time" ) { $intime = 0; }
+      elsif ( $element->{Name} eq "latitude" ) { $inlat = 0; }
+      elsif ( $element->{Name} eq "longitude" ) { $inlon = 0; }
+      elsif ( $element->{Name} eq "depth" ) { $indepth = 0; }
+      elsif ( $element->{Name} eq "creationInfo" ) { $increationInfo = 0; }
+
+      if ( ($intime || $inlat || $inlon || $indepth || $increationInfo) && $element->{Name} eq "value" ) { $invalue = 0; }
+      if ( $increationInfo && $element->{Name} eq "author" ) { $inauthor = 0; }
+    }
+
+    if ( $inmagnitude ) {
+      if ( $element->{Name} eq "mag" ) { $inmag = 0; }
+      elsif ( $element->{Name} eq "type" ) { $intype = 0; }
+      elsif ( $element->{Name} eq "creationInfo" ) { $increationInfo = 0; }
+
+      if ( $inmag && $element->{Name} eq "value" ) { $invalue = 0; }
+      if ( $increationInfo && $element->{Name} eq "author" ) { $inauthor = 0; }
+    }
+  }
+
+  sub characters {
+    my ($self,$element) = @_;
+
+    if ( $element->{Data} && $inevent ) {
+
+      if ( $inpreferredOriginID ) { $porigin .= $element->{Data}; }
+      elsif ( $indescription && $intext ) { $name .= $element->{Data}; }
+
+      elsif ( $inorigin ) {
+	if ( $intime && $invalue ) { $time .= $element->{Data}; }
+	elsif ($inlat && $invalue ) { $lat .= $element->{Data}; }
+	elsif ($inlon && $invalue ) { $lon .= $element->{Data}; }
+	elsif ($indepth && $invalue ) { $depth .= $element->{Data}; }
+	elsif ($increationInfo && $inauthor ) { $author .= $element->{Data}; }
+      }
+
+      elsif ( $inmagnitude ) {
+	if ( $inmag && $invalue ) { $mag .= $element->{Data}; }
+	elsif ( $intype ) { $magtype .= $element->{Data}; }
+	elsif ( $increationInfo && $inauthor ) { $magauthor .= $element->{Data}; }
+      }
+    }
+  } # End of SAX ESHandler
+} # End of FetchMetaData()
+
+
+######################################################################
+# EDCallBack:
+#
+# A call back for LWP downloading.
+#
+# Add received data to eventxml string, tally up the received data
+# size and print and updated (overwriting) byte count string.
+######################################################################
+sub EDCallBack {
+  my ($data, $response, $protocol) = @_;
+  $eventxml .= $data;
+  $datasize += length($data);
+
+  if ( $verbose ) {
+    printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
+  }
+}
+
+
+######################################################################
+# sizestring (bytes):
+#
+# Return a clean size string for a given byte count.
+######################################################################
+sub sizestring { # sizestring (bytes)
+  my $bytes = shift;
+
+  if ( $bytes < 1000 ) {
+    return sprintf "%d Bytes", $bytes;
+  }
+  elsif ( ($bytes / 1024) < 1000 ) {
+    return sprintf "%.1f KB", $bytes / 1024;
+  }
+  elsif ( ($bytes / 1024 / 1024) < 1000 ) {
+    return sprintf "%.1f MB", $bytes / 1024 / 1024;
+  }
+  elsif ( ($bytes / 1024 / 1024 / 1024) < 1000 ) {
+    return sprintf "%.1f GB", $bytes / 1024 / 1024 / 1024;
+  }
+  elsif ( ($bytes / 1024 / 1024 / 1024 / 1024) < 1000 ) {
+    return sprintf "%.1f TB", $bytes / 1024 / 1024 / 1024 / 1024;
+  }
+  else {
+    return "";
+  }
+} # End of sizestring()
+
+
+######################################################################
+#
+# Package RequestAgent: a superclass for LWP::UserAgent with override
+# of LWP::UserAgent methods to set default user agent and handle
+# authentication credentials.
+#
+######################################################################
+BEGIN {
+  use LWP;
+  package RequestAgent;
+  our @ISA = qw(LWP::UserAgent);
+
+  sub new
+    {
+      my $self = LWP::UserAgent::new(@_);
+      my $fulluseragent = $useragent;
+      $fulluseragent .= " ($appname)" if ( $appname );
+      $self->agent($fulluseragent);
+      $self;
+    }
+
+  sub get_basic_credentials
+    {
+      my ($self, $realm, $uri) = @_;
+
+      if ( defined $auth ) {
+        return split(':', $auth, 2);
+      }
+      elsif (-t) {
+        my $netloc = $uri->host_port;
+        print "\n";
+        print "Enter username for $realm at $netloc: ";
+        my $user = <STDIN>;
+        chomp($user);
+        return (undef, undef) unless length $user;
+        print "Password: ";
+        system("stty -echo");
+        my $password = <STDIN>;
+        system("stty echo");
+        print "\n";  # because we disabled echo
+        chomp($password);
+        return ($user, $password);
+      }
+      else {
+        return (undef, undef)
+      }
+    }
+} # End of LWP::UserAgent override
