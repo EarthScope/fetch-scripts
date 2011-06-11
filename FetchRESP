@@ -62,8 +62,8 @@
 #  - Fix error message to report unrecognized channels in BREQ_FAST files.
 #
 # 2011.161
-#  - Add Perl and LWP version to UserAgent and wsclient URL to usage message
-#  - Print script name and local time when verbose
+#  - Add Perl and LWP version to UserAgent and wsclient URL to usage message.
+#  - Print script name and local time when verbose.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
