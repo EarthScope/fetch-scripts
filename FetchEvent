@@ -57,7 +57,6 @@ my $contributor  = undef;
 my $updatedafter = undef;
 my $secondary    = undef;
 my $orderbymag   = undef;
-my $limit        = undef;
 
 my $eventid      = undef;
 my $originid     = undef;
@@ -91,7 +90,6 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
 			      'updatedafter|ua=s' => \$updatedafter,
                               'secondary'         => \$secondary,
 			      'orderbymag'        => \$orderbymag,
-                              'limit|l=s'         => \$limit,
 
 			      'eventid|evid=s'    => \$eventid,
 			      'originid|orid=s'   => \$originid,
@@ -134,7 +132,6 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print "\n";
   print " --secondary       Return secondary origins, default is only primary origins\n";
   print " --orderbymag      Order results by magnitude instead of time\n";
-  print " --limit #         Set limit of return results\n";
 
   print "\n";
   print " --evid id         Select a specific event by DMC event ID\n";
@@ -182,6 +179,10 @@ my $datasize;
 # Fetch events from the web service
 &FetchEvents();
 
+my $totalevents = 0;
+my $totalorigins = 0;
+my $totalmags = 0;
+
 # Write to either specified output file or stdout
 my $eventfile = ( $outfile ) ? $outfile : "-";
 
@@ -191,25 +192,30 @@ if ( $eventfile ) {
     printf STDERR "No events selected\n", scalar @eventids;
   }
   else {
-    printf STDERR "Writing event file (%d)\n", scalar @eventids if ( $verbose );
-
     open (EVENT, ">$eventfile") || die "Cannot open event file '$eventfile': $!\n";
 
     foreach my $eventid ( @eventids ) {
+      $totalevents++;
       print EVENT "$eventid - $eventname{$eventid}\n";
 
       foreach my $origin ( @{$origins{$eventid}} ) {
+	$totalorigins++;
 	print EVENT "  $origin\n";
       }
 
       foreach my $mag ( @{$mags{$eventid}} ) {
+	$totalmags++;
 	print EVENT "  $mag\n";
       }
-
     }
 
     close EVENT;
   }
+}
+
+if ( $verbose && scalar @eventids > 0 ) {
+  printf STDERR "Selected %d events (%d origins, %d magnitudes)\n",
+    $totalevents, $totalorigins, $totalmags;
 }
 
 print STDERR "DONE\n";
@@ -252,7 +258,6 @@ sub FetchEvents {
   $uri .= "&contributor=$contributor" if ( $contributor );
   $uri .= "&updatedafter=$updatedafter" if ( $updatedafter );
   $uri .= "&preferredOnly=no" if ( $secondary );
-  $uri .= "&limit=$limit" if ( $limit );
 
   $uri .= "&eventId=$eventid" if ( $eventid );
   $uri .= "&originId=$originid" if ( $originid );
