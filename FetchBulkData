@@ -567,28 +567,28 @@ sub FetchWaveformData {
   foreach my $req ( sort keys %request ) {
     my ($wnet,$wsta,$wloc,$wchan,$wstart,$wend) = split (/\|/, $req);
     $count++;
-    
+
     # Determine day coverage for this request
     my $rstartepoch = str2time ($wstart);
     my $rendepoch = str2time ($wend);
     $groupdays += int ((($rendepoch - $rstartepoch) / 86400.0) + 0.5);
-    
+
     # Add request to current group
     push (@{$grouprequest[$groupidx]}, "$wnet $wsta $wloc $wchan $wstart $wend");
-    
+
     # If beyond minstadays move to the next group
     if ( $groupdays > $minstadays ) {
       $groupdays = 0;
       $groupidx++;
     }
   }
-  
+
   if ( ! $count ) {
     print STDERR "No data selections to request\n";
     return;
   }
 
-  print STDERR "Fetching waveform data\n" if ( $verbose );
+  print STDERR "Fetching waveform data ($count selections)\n" if ( $verbose );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
@@ -605,22 +605,21 @@ sub FetchWaveformData {
     my $postdata = "quality $qual\n";
     $postdata .= "minimumlength=$mslopt\n" if ( defined $mslopt );
     $postdata .= "longestonly=true\n" if ( defined $lsoopt );
-    
+
     foreach my $req ( @{$groupref} ) {
       $postdata .= "$req\n";
     }
-    
+
     print STDERR "Waveform URI: '$uri'\n" if ( $verbose > 1 );
     print STDERR "Data selection (POST):\n$postdata" if ( $verbose > 1 );
-    
-CHAD, print current group of total
-    print STDERR "Downloading waveform data ($count selections) :: Received " if ( $verbose );
-    
+
+    print STDERR "Downloading waveform data (group $groupidx of $groupcnt) :: Received " if ( $verbose );
+
     $datasize = 0;
-    
+
     # Fetch waveform data from web service using callback routine
     my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack );
-    
+
     if ( $response->code == 404 ) {
       print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
     }
@@ -633,7 +632,7 @@ CHAD, print current group of total
       print STDERR "\n" if ( $verbose );
     }
   }
-  
+
   close OUT;
 
   my $duration = Time::HiRes::time - $ftime;
