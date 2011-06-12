@@ -546,7 +546,11 @@ sub ReadBFastFile {
 # FetchWaveformData:
 #
 # Collect waveform data for each entry in the %request hash.  All
-# returned data is written to the global output file handle.
+# returned data is written to the global output file (outfile).
+#
+# The request list is separatated into groups where the group size is
+# defined in terms of station-days.  If the request for a group fails
+# it will be retried, after too many failures.
 #
 ######################################################################
 sub FetchWaveformData {
@@ -560,7 +564,7 @@ sub FetchWaveformData {
 
   # Determine request data groups to avoid single large requests
   my @grouprequest = ();
-  my $minstadays = 5; #30;
+  my $minstadays = 30;  # Controls group size as station-days
 
   my $groupdays = 0;
   my $groupidx = 0;
@@ -638,28 +642,38 @@ sub FetchWaveformData {
 	  . $response->code . " :: " . status_message($response->code) . "\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
 
-CHAD, could do tell() - > seek(), but how to handle stdout?
-      
-      redocnt++;
-      goto REDOGROUP;
+      # For real output files rewind position to the end of the last group data
+      seek (OUT, $outoffset, 0) if ( $outfile ne "-" );
+
+      # Retry in 10 seconds or give up if already tried 60 times.
+      if ( $redocnt < 60 ) {
+	print STDERR "Retrying request in 10 seconds\n";
+	sleep 10;
+	$redocnt++;
+	goto REDOGROUP;
+      }
+      else {
+	print STDERR "Too many retries, giving up.\n";
+	last;
+      }
     }
     else {
       print STDERR "\n" if ( $verbose );
     }
 
-
-    # Copy partial file to output
+    # Get ready for next group
+    $redocnt = 0;
     $groupnum++;
-
-    $outoffset = tell OUT;
+    $outoffset = tell (OUT);
+    $totalbytes += $datasize;
   }
 
   close OUT;
 
   my $duration = Time::HiRes::time - $ftime;
-  my $rate = $datasize/(($duration)?$duration:0.000001);
+  my $rate = $totalbytes/(($duration)?$duration:0.000001);
   printf (STDERR "Received %s of waveform data in %.1f seconds (%s/s)\n",
-	  sizestring($datasize), $duration, sizestring($rate));
+	  sizestring($totalbytes), $duration, sizestring($rate));
 
   # Remove empty file
   unlink $outfile if ( -z $outfile );
