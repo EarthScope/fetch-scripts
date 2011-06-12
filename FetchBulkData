@@ -560,10 +560,11 @@ sub FetchWaveformData {
 
   # Determine request data groups to avoid single large requests
   my @grouprequest = ();
-  my $minstadays = 30;
+  my $minstadays = 5; #30;
 
   my $groupdays = 0;
   my $groupidx = 0;
+  my $groupsta = undef;
   foreach my $req ( sort keys %request ) {
     my ($wnet,$wsta,$wloc,$wchan,$wstart,$wend) = split (/\|/, $req);
     $count++;
@@ -571,16 +572,24 @@ sub FetchWaveformData {
     # Determine day coverage for this request
     my $rstartepoch = str2time ($wstart);
     my $rendepoch = str2time ($wend);
-    $groupdays += int ((($rendepoch - $rstartepoch) / 86400.0) + 0.5);
+    my $reqdays = int ((($rendepoch - $rstartepoch) / 86400.0) + 0.5);
 
-    # Add request to current group
-    push (@{$grouprequest[$groupidx]}, "$wnet $wsta $wloc $wchan $wstart $wend");
+    $groupsta = $wsta if ( ! defined $groupsta );
+
+    # Assume first request for a station represents all channels in terms of days
+    if ( $wsta ne $groupsta ) {
+      $groupdays += $reqdays;
+      $groupsta = $wsta;
+    }
 
     # If beyond minstadays move to the next group
-    if ( $groupdays > $minstadays ) {
+    if ( $groupdays >= $minstadays ) {
       $groupdays = 0;
       $groupidx++;
     }
+
+    # Add request to current group
+    push (@{$grouprequest[$groupidx]}, "$wnet $wsta $wloc $wchan $wstart $wend");
   }
 
   if ( ! $count ) {
@@ -592,12 +601,13 @@ sub FetchWaveformData {
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
-  # Loop over data groups
-  my $groupidx = 0;
+  # Request each data group
+  my $groupnum = 1;
   my $groupcnt = scalar @grouprequest;
+  my $redocnt = 0;
+  my $outoffset = 0;
   foreach my $groupref ( @grouprequest ) {
-    $groupidx++;
-
+  REDOGROUP:
     # Create web service URI
     my $uri = "${waveformservice}";
 
@@ -613,7 +623,7 @@ sub FetchWaveformData {
     print STDERR "Waveform URI: '$uri'\n" if ( $verbose > 1 );
     print STDERR "Data selection (POST):\n$postdata" if ( $verbose > 1 );
 
-    print STDERR "Downloading waveform data (group $groupidx of $groupcnt) :: Received " if ( $verbose );
+    print STDERR "Downloading waveform data (group $groupnum of $groupcnt) :: Received " if ( $verbose );
 
     $datasize = 0;
 
@@ -627,10 +637,21 @@ sub FetchWaveformData {
       print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
 	  . $response->code . " :: " . status_message($response->code) . "\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+
+CHAD, could do tell() - > seek(), but how to handle stdout?
+      
+      redocnt++;
+      goto REDOGROUP;
     }
     else {
       print STDERR "\n" if ( $verbose );
     }
+
+
+    # Copy partial file to output
+    $groupnum++;
+
+    $outoffset = tell OUT;
   }
 
   close OUT;
