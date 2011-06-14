@@ -139,6 +139,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
 			      'auth|a=s'          => \$auth,
 			      'outfile|o=s'       => \$outfile,
 			      'xmlfile|X=s'       => \$xmlfile,
+			      'msurl=s'           => \$metadataservice,
 			    );
 
 my $required =  ( defined $net || defined $sta ||
