@@ -647,7 +647,6 @@ sub FetchMetaData {
   my $instart = 0;
   my $inend = 0;
   my $inlat = 0;
-  my $inlat = 0;
   my $inlon = 0;
   my $inelevation = 0;
   my $indepth = 0;
