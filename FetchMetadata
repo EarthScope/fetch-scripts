@@ -84,6 +84,8 @@
 #  - Add Perl and LWP version to UserAgent and wsclient URL to usage message.
 #  - Print script name and local time when verbose.
 #  - Add example of selection file and more comments on lists and wildcarding.
+#  - Add -msurl option to override metadata service query URL.
+#  - Add -sta option to request and parse station level information only
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -117,6 +119,7 @@ my $endtime      = undef;
 my $updatedafter = undef;
 my $selectfile   = undef;
 my $bfastfile    = undef;
+my $stalevel     = undef;
 my $appname      = undef;
 my $auth         = undef;
 my $outfile      = undef;
@@ -135,6 +138,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
 			      'updatedafter|ua=s' => \$updatedafter,
 			      'selectfile|l=s'    => \$selectfile,
 			      'bfastfile|b=s'     => \$bfastfile,
+			      'stalevel|sta'      => \$stalevel,
 			      'appname|A=s'       => \$appname,
 			      'auth|a=s'          => \$auth,
 			      'outfile|o=s'       => \$outfile,
@@ -241,7 +245,7 @@ if ( $metafile ) {
   if ( scalar @metadata <= 0 ) {
     printf STDERR "No metdata available\n", scalar @metadata;
   }
-  else {
+  elsif ( ! defined $stalevel ) {
     printf STDERR "Writing metadata (%d channel epochs) file\n", scalar @metadata if ( $verbose );
 
     open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
@@ -260,6 +264,22 @@ if ( $metafile ) {
       $samplerate = sprintf ("%0g", $samplerate);
 
       print META "$net,$sta,$loc,$chan,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$sens,$sensfreq,$sensunit,$samplerate,$start,$end\n";
+    }
+    
+    close META;
+  }
+  else {
+    printf STDERR "Writing metadata (%d station epochs) file\n", scalar @metadata if ( $verbose );
+
+    open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
+
+    # Print header line
+    print META "#net,sta,lat,lon,elev,site,start,end\n";
+
+    foreach my $station ( sort @metadata ) {
+      my ($net,$sta,$start,$end,$lat,$lon,$elev,$site) = split (/,/, $station);
+
+      print META "$net,$sta,$lat,$lon,$elev,$site,$start,$end\n";
     }
 
     close META;
@@ -463,7 +483,8 @@ sub FetchMetaData {
   my $rendepoch = str2time ($rend);
 
   # Create web service URI
-  my $uri = "${metadataservice}?level=chan";
+  my $uri = "${metadataservice}?level=";
+  $uri .= ( $stalevel ) ? "sta" : "chan";
   $uri .= "&network=$rnet" if ( $rnet );
   $uri .= "&station=$rsta" if ( $rsta );
   $uri .= "&location=$rloc" if ( $rloc );
@@ -511,7 +532,13 @@ sub FetchMetaData {
 
   # Create stream oriented XML parser instance
   use XML::SAX;
-  my $parser = new XML::SAX::ParserFactory->parser( Handler => MDSHandler->new );
+  my $parser = undef;
+  if ( ! defined $stalevel ) {
+    $parser = new XML::SAX::ParserFactory->parser( Handler => MDSHandlerChannel->new );
+  }
+  else {
+    $parser = new XML::SAX::ParserFactory->parser( Handler => MDSHandlerStation->new );
+  }
 
   my $totalepochs = 0;
 
@@ -551,17 +578,16 @@ sub FetchMetaData {
   printf (STDERR "Processed metadata for $totalepochs channel epochs in %.1f seconds (%s/s)\n",
 	  $duration, sizestring($rate));
 
-  ## End of this routine, below is the XML parsing handler used above
+  ## End of this routine, below is the XML parsing handlers used above
 
-  ## Beginning of SAX MDSHandler, event-based streaming XML parsing
-  package MDSHandler;
+  ## Beginning of SAX MDSHandlerChannel, event-based streaming XML parsing for Channel level StationXML
+  package MDSHandlerChannel;
   use base qw(XML::SAX::Base);
   use HTTP::Date;
 
   my $inepoch = 0;
   my $instart = 0;
   my $inend = 0;
-  my $inlat = 0;
   my $inlat = 0;
   my $inlon = 0;
   my $inelevation = 0;
@@ -699,7 +725,105 @@ sub FetchMetaData {
       elsif ( $insensunits ) { $sensunit .= $element->{Data}; }
       elsif ( $infrequency ) { $sensfreq .= $element->{Data}; }
     }
-  } # End of SAX MDSHandler
+  } # End of SAX MDSHandlerChannel
+
+  ## Beginning of SAX MDSHandlerStation, event-based streaming XML parsing for Station level StationXML
+  package MDSHandlerStation;
+  use base qw(XML::SAX::Base);
+  use HTTP::Date;
+
+  my $instationepoch = 0;
+  my $instart = 0;
+  my $inend = 0;
+  my $inlat = 0;
+  my $inlon = 0;
+  my $inelevation = 0;
+  my $insite = 0;
+  my $incountry = 0;
+
+  my ($net,$sta,$start,$end,$lat,$lon,$elev,$site) = (undef) x 8;
+
+  sub start_element {
+    my ($self,$element) = @_;
+
+    if ( $element->{Name} eq "Station" ) {
+      ($net,$sta,$start,$end,$lat,$lon,$elev,$site) = (undef) x 8;
+
+      $net = $element->{Attributes}->{'{}net_code'}->{Value};
+      $sta = $element->{Attributes}->{'{}sta_code'}->{Value};
+    }
+
+    elsif ( $element->{Name} eq "StationEpoch" ) {
+      $instationepoch = 1;
+    }
+
+    if ( $instationepoch ) {
+      if ( $element->{Name} eq "StartDate" ) { $instart = 1; }
+      elsif ( $element->{Name} eq "EndDate" ) { $inend = 1; }
+      elsif ( $element->{Name} eq "Lat" ) { $inlat = 1; }
+      elsif ( $element->{Name} eq "Lon" ) { $inlon = 1; }
+      elsif ( $element->{Name} eq "Elevation" ) { $inelevation = 1; }
+      elsif ( $element->{Name} eq "Site" ) { $insite = 1; }
+    }
+
+    if ( $insite ) {
+      if ( $element->{Name} eq "Country" ) { $incountry = 1; }
+    }
+  }
+
+  sub end_element {
+    my ($self,$element) = @_;
+
+    if ( $element->{Name} eq "Station" ) {
+      ($net,$sta) = (undef) x 2;
+    }
+
+    elsif ( $element->{Name} eq "StationEpoch" ) {
+      # Track epoch count
+      $totalepochs++;
+      
+      # Translate commas in metadata instrument name to semi-colons
+      $site =~ s/,/;/g;
+
+      # Cleanup start and end strings
+      ($start) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      ($end) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+
+      # Push channel epoch metadata into storage array
+      push (@metadata, "$net,$sta,$start,$end,$lat,$lon,$elev,$site");
+
+      # Reset StationEpoch level fields
+      ($start,$end,$lat,$lon,$elev,$site) = (undef) x 6;
+      $inepoch = 0;
+    }
+
+    if ( $instationepoch ) {
+      if ( $element->{Name} eq "StartDate" ) { $instart = 0; }
+      elsif ( $element->{Name} eq "EndDate" ) { $inend = 0; }
+      elsif ( $element->{Name} eq "Lat" ) { $inlat = 0; }
+      elsif ( $element->{Name} eq "Lon" ) { $inlon = 0; }
+      elsif ( $element->{Name} eq "Elevation" ) { $inelevation = 0; }
+      elsif ( $element->{Name} eq "Site" ) { $insite = 0; }
+    }
+
+    if ( $insite ) {
+      if ( $element->{Name} eq "Country" ) { $incountry = 0; }
+    }
+  }
+
+  sub characters {
+    my ($self,$element) = @_;
+
+    if ( $element->{Data} ) {
+      if ( $instart ) { $start .= $element->{Data}; }
+      elsif ( $inend ) { $end .= $element->{Data}; }
+      elsif ( $inlat ) { $lat .= $element->{Data}; }
+      elsif ( $inlon ) { $lon .= $element->{Data}; }
+      elsif ( $inelevation ) { $elev .= $element->{Data}; }
+
+      elsif ( $incountry ) { $site .= $element->{Data}; }
+    }
+  } # End of SAX MDSHandlerStation
 } # End of FetchMetaData()
 
 
