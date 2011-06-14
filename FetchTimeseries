@@ -2,6 +2,8 @@
 #
 # FetchTimeseries
 #
+# Find the most current version at http://www.iris.edu/ws/wsclients/
+#
 # Fetch processed time series the DMC web interfaces.  This program is
 # primarily written to select and fetch waveform data but can also
 # fetch metadata.
@@ -9,7 +11,7 @@
 # Installation of the XML::SAX::ExpatXS module will significantly
 # speed up the parsing of metadata results returned as XML.
 #
-# Data selection
+## Data selection
 #
 # Data is generally selected by specifying network, station, location,
 # channel, quality, start time and end time.  The name parameters may
@@ -22,9 +24,20 @@
 # 2) A selection file containing a list of:
 #    Net Sta Loc Chan Start End
 #
-# 3) A BREQ_FAST formatted file
+# 3) A BREQ_FAST formatted file, http://www.iris.edu/manuals/breq_fast.htm
 #
-# Data output
+# Example selection file contents:
+# II BFO 00 BHZ 2011-01-01T00:00:00 2011-01-01T01:00:00
+# IU ANMO 00 BHZ 2011-01-01T00:00:00 2011-01-01T01:00:00
+# IU COLA 00 BHZ 2011-01-01T00:00:00 2011-01-01T01:00:00
+#
+# For the command line arguments and the selection file the network,
+# station location and channel fields may contain the common * and ?
+# wildcards, meaning zero-to-many and a single character respectively.
+# These fields may also be comma-separated lists, for example, the
+# network may be specified as II,IU,TA to select three networks.
+#
+## Data output
 #
 # miniSEED: If the -o option is used to specify an output file
 # waveform data will be requested based on the selection and all
@@ -62,10 +75,11 @@
 # 2011.089
 #  - Fix error message to report unrecognized channels in BREQ_FAST files.
 #
-# # 2011.161
+# # 2011.164
 #  - Add Perl and LWP version to UserAgent and wsclient URL to usage message.
 #  - Print script name and local time when verbose.
 #  - Allow quality in BREQ_FAST to be E.
+#  - Add example of selection file and more comments on lists and wildcarding.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -77,7 +91,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.089";
+my $version = "2011.164";
 
 my $scriptname = basename($0);
 
@@ -137,10 +151,10 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print "Usage: $scriptname [options]\n\n";
   print " Options:\n";
   print " -v                Increase verbosity, may be specified multiple times\n";
-  print " -N,--net          Network code, default is all\n";
-  print " -S,--sta          Station code, default is all\n";
-  print " -L,--loc          Location ID, default is all\n";
-  print " -C,--chan         Channel codes, default is all\n";
+  print " -N,--net          Network code, list and wildcards (* and ?) accepted\n";
+  print " -S,--sta          Station code, list and wildcards (* and ?) accepted\n";
+  print " -L,--loc          Location ID, list and wildcards (* and ?) accepted\n";
+  print " -C,--chan         Channel codes, list and wildcards (* and ?) accepted\n";
   print " -Q,--qual         Quality indicator, default is best\n";
   print " -s starttime      Specify start time (YYYY/MM/DD HH:MM:SS)\n";
   print " -e endtime        Specify end time (YYYY/MM/DD HH:MM:SS)\n";

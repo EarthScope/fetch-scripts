@@ -2,6 +2,8 @@
 #
 # FetchEvent
 #
+# Find the most current version at http://www.iris.edu/ws/wsclients/
+#
 # Fetch event parameters from the DMC web interfaces.
 #
 # Dependencies: This script should run without problems on Perl
