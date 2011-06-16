@@ -576,8 +576,8 @@ sub FetchMetaData {
 
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $datasize/(($duration)?$duration:0.000001);
-  printf (STDERR "Processed metadata for $totalepochs channel epochs in %.1f seconds (%s/s)\n",
-	  $duration, sizestring($rate));
+  printf (STDERR "Processed metadata for $totalepochs %s epochs in %.1f seconds (%s/s)\n",
+	  ($stalevel)?"station":"channel",$duration, sizestring($rate));
 
   ## End of this routine, below is the XML parsing handlers used above
 
