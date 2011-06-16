@@ -148,6 +148,9 @@
 #  - Allow quality in BREQ_FAST to be E.
 #  - Add example of selection file and more comments on lists and wildcarding.
 #
+# 2011.166:
+#  - Fix data request grouping for small time windows, oopsie.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -158,7 +161,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.164";
+my $version = "2011.166";
 
 my $scriptname = basename($0);
 
@@ -594,6 +597,7 @@ sub FetchWaveformData {
     my $rstartepoch = str2time ($wstart);
     my $rendepoch = str2time ($wend);
     my $reqdays = int ((($rendepoch - $rstartepoch) / 86400.0) + 0.5);
+    $reqdays = 1 if ( $reqdays < 1 );
 
     $groupsta = $wsta if ( ! defined $groupsta );
 
