@@ -151,8 +151,9 @@
 # 2011.166:
 #  - Fix data request grouping for small time windows, oopsie.
 #
-# 2011.172:
-#  - Remove newline and carriage return characters from instrument values.
+# 2011.172
+#  - Remove newline and carriage return characters and trailing spaces from
+#  site and instrument strings.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -1090,8 +1091,9 @@ sub FetchMetaData {
       # Translate commas in metadata instrument name to semi-colons
       $instrument =~ s/,/;/g;
 
-      # Remove newlines and returns in metadata instrument name
+      # Remove newlines, returns and trailing spaces in metadata instrument name
       $instrument =~ s/[\n\r]//g;
+      $instrument =~ s/\s*$//g;
 
       # Trim sensitivity units to short version, they are returned as, e.g. "M/S - Meters per second"
       ($sensunit) = $sensunit =~ /(.*?)\s\-\s.*/ if ( $sensunit );

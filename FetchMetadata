@@ -88,7 +88,8 @@
 #  - Add -sta option to request and parse station level information only
 #
 # 2011.172
-#  - Remove newline and carriage return characters from site and instrument values.
+#  - Remove newline and carriage return characters and trailing spaces from
+#  site and instrument strings.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -671,8 +672,9 @@ sub FetchMetaData {
       # Translate commas in metadata instrument name to semi-colons
       $instrument =~ s/,/;/g;
 
-      # Remove newlines and returns in metadata instrument name
+      # Remove newlines, returns & trailing spaces in metadata instrument name
       $instrument =~ s/[\n\r]//g;
+      $instrument =~ s/\s*$//g;
 
       # Trim sensitivity units to short version, they are returned as, e.g. "M/S - Meters per second"
       ($sensunit) = $sensunit =~ /(.*?)\s\-\s.*/ if ( $sensunit );
@@ -792,8 +794,9 @@ sub FetchMetaData {
       # Translate commas in site name to semi-colons
       $site =~ s/,/;/g;
 
-      # Remove newlines and returns in site name
+      # Remove newlines, returns and trailing spaces in site name
       $site =~ s/[\n\r]//g;
+      $site =~ s/\s*$//g;
 
       # Cleanup start and end strings
       ($start) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
