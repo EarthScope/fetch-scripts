@@ -151,6 +151,9 @@
 # 2011.166:
 #  - Fix data request grouping for small time windows, oopsie.
 #
+# 2011.172:
+#  - Remove newline and carriage return characters from instrument values.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -161,7 +164,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.166";
+my $version = "2011.172";
 
 my $scriptname = basename($0);
 
@@ -1086,6 +1089,9 @@ sub FetchMetaData {
 
       # Translate commas in metadata instrument name to semi-colons
       $instrument =~ s/,/;/g;
+
+      # Remove newlines and returns in metadata instrument name
+      $instrument =~ s/[\n\r]//g;
 
       # Trim sensitivity units to short version, they are returned as, e.g. "M/S - Meters per second"
       ($sensunit) = $sensunit =~ /(.*?)\s\-\s.*/ if ( $sensunit );
