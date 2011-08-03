@@ -155,6 +155,10 @@
 #  - Remove newline and carriage return characters and trailing spaces from
 #  site and instrument strings.
 #
+# 2011.214:
+#  - Add --lat, --lon and --radius selection options.
+#  - Fix handling for selections of multiple time windows.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -165,7 +169,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.172";
+my $version = "2011.214";
 
 my $scriptname = basename($0);
 
@@ -198,6 +202,9 @@ my $chan       = undef;
 my $qual       = "B";
 my $starttime  = undef;
 my $endtime    = undef;
+my @latrange   = ();      # (minlat:maxlat)
+my @lonrange   = ();      # (minlon:maxlon)
+my @degrange   = ();      # (lat:lon:maxradius[:minradius])
 my $selectfile = undef;
 my $bfastfile  = undef;
 my $mslopt     = undef;
@@ -220,6 +227,9 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
                               'qual|Q=s'       => \$qual,
 			      'starttime|s=s'  => \$starttime,
 			      'endtime|e=s'    => \$endtime,
+			      'lat=s'          => \@latrange,
+			      'lon=s'          => \@lonrange,
+			      'radius=s'       => \@degrange,
 			      'selectfile|l=s' => \$selectfile,
 			      'bfastfile|b=s'  => \$bfastfile,
 			      'msl=s'          => \$mslopt,
@@ -254,6 +264,10 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -Q,--qual         Quality indicator, default is best\n";
   print " -s starttime      Specify start time (YYYY-MM-DD,HH:MM:SS)\n";
   print " -e endtime        Specify end time (YYYY-MM-DD,HH:MM:SS)\n";
+  print " --lat min:max     Specify a minimum and/or maximum latitude range\n";
+  print " --lon min:max     Specify a minimum and/or maximum longitude range\n";
+  print " --radius lat:lon:maxradius[:minradius]\n";
+  print "                     Specify circular region with optional minimum radius\n";
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
   print " -msl length       Limit returned data to a minimum segment length\n";
@@ -298,6 +312,41 @@ if ( $starttime ) {
 if ( $endtime ) {
   my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $endtime);
   $endtime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+}
+
+# Validate and prepare lat, lon and radius input
+if ( scalar @latrange ) {
+  @latrange = split (/:/, $latrange[0]);
+
+  if ( $latrange[0] && ($latrange[0] < -90.0 || $latrange[0] > 90.0) ) {
+    die "Minimum latitude out of range: $latrange[0]\n";
+  }
+  if ( $latrange[1] && ($latrange[1] < -90.0 || $latrange[1] > 90.0) ) {
+    die "Maximum latitude out of range: $latrange[1]\n";
+  }
+}
+if ( scalar @lonrange ) {
+  @lonrange = split (/\:/, $lonrange[0]);
+
+  if ( $lonrange[0] && ($lonrange[0] < -180.0 || $lonrange[0] > 180.0) ) {
+    die "Minimum longitude out of range: $lonrange[0]\n";
+  }
+  if ( $lonrange[1] && ($lonrange[1] < -180.0 || $lonrange[1] > 180.0) ) {
+    die "Maximum longitude out of range: $lonrange[1]\n";
+  }
+}
+if ( scalar @degrange ) {
+  @degrange = split (/\:/, $degrange[0]);
+
+  if ( scalar @degrange < 3 || scalar @degrange > 4 ) {
+    die "Unrecognized radius specification: @degrange\n";
+  }
+  if ( $degrange[0] && ($degrange[0] < -90.0 || $degrange[0] > 90.0) ) {
+    die "Radius latitude out of range: $degrange[0]\n";
+  }
+  if ( $degrange[1] && ($degrange[1] < -180.0 || $degrange[1] > 180.0) ) {
+    die "Radius longitude out of range: $degrange[1]\n";
+  }
 }
 
 # An array to hold data selections
@@ -907,7 +956,8 @@ sub DLCallBack {
 #
 ######################################################################
 sub FetchMetaData {
-  my ($rnet,$rsta,$rloc,$rchan,$rstart,$rend) = @_;
+  # These our declared with a wider scope for use in the enclosed package
+  our ($rnet,$rsta,$rloc,$rchan,$rstart,$rend) = @_;
 
   # Create HTTP user agent
   my $ua = RequestAgent->new();
@@ -927,6 +977,20 @@ sub FetchMetaData {
     my ($enddate) = $rend =~ /^(\d{4,4}-\d{1,2}-\d{1,2}).*$/;
 
     $uri .= "&timewindow=${startdate},${enddate}";
+  }
+  if ( scalar @latrange ) {
+    $uri .= "&minlat=$latrange[0]" if ( $latrange[0] );
+    $uri .= "&maxlat=$latrange[1]" if ( $latrange[1] );
+  }
+  if ( scalar @lonrange ) {
+    $uri .= "&minlon=$lonrange[0]" if ( $lonrange[0] );
+    $uri .= "&maxlon=$lonrange[1]" if ( $lonrange[1] );
+  }
+  if ( scalar @degrange ) {
+    $uri .= "&lat=$degrange[0]" if ( $degrange[0] );
+    $uri .= "&lon=$degrange[1]" if ( $degrange[1] );
+    $uri .= "&maxradius=$degrange[2]" if ( $degrange[2] );
+    $uri .= "&maxradius=$degrange[3]" if ( $degrange[3] );
   }
 
   my $ftime = Time::HiRes::time;
@@ -1106,7 +1170,7 @@ sub FetchMetaData {
 
       # Push channel epoch metadata into storage array
       push (@metadata, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit");
-
+      
       # Put entry into request hash, value is the widest range of channel epochs
       if ( ! exists  $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} ) {
 	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$mstart|$mend";
