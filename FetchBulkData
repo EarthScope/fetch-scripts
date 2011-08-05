@@ -155,7 +155,7 @@
 #  - Remove newline and carriage return characters and trailing spaces from
 #  site and instrument strings.
 #
-# 2011.214:
+# 2011.216:
 #  - Add --lat, --lon and --radius selection options.
 #  - Fix handling for selections of multiple time windows.
 #
@@ -169,7 +169,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.214";
+my $version = "2011.216";
 
 my $scriptname = basename($0);
 
@@ -248,6 +248,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
 
 my $required =  ( defined $net || defined $sta ||
 		  defined $loc || defined $chan ||
+		  scalar @latrange || scalar @lonrange || scalar @degrange ||
 		  defined $starttime || defined $endtime ||
 		  defined $selectfile || defined $bfastfile );
 
@@ -376,6 +377,14 @@ if ( $verbose > 2 ) {
   foreach my $select ( @selections ) {
     print STDERR "    $select\n";
   }
+  print STDERR "Latitude range: $latrange[0] : $latrange[1]\n" if ( scalar @latrange );
+  print STDERR "Longitude range: $lonrange[0] : $lonrange[1]\n" if ( scalar @lonrange );
+  print STDERR "Radius range: $degrange[0] : $degrange[1] : $degrange[2] : $degrange[3]\n" if ( scalar @degrange );
+}
+
+# Add blank request entry if selections have been implicitly identified by location ranges
+if ( ! scalar @selections && (scalar @latrange || scalar @lonrange || scalar @degrange) ) {
+  push (@selections,"|||||");
 }
 
 # An array to hold channel list and metadata
@@ -990,7 +999,7 @@ sub FetchMetaData {
     $uri .= "&lat=$degrange[0]" if ( $degrange[0] );
     $uri .= "&lon=$degrange[1]" if ( $degrange[1] );
     $uri .= "&maxradius=$degrange[2]" if ( $degrange[2] );
-    $uri .= "&maxradius=$degrange[3]" if ( $degrange[3] );
+    $uri .= "&minradius=$degrange[3]" if ( $degrange[3] );
   }
 
   my $ftime = Time::HiRes::time;
