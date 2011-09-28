@@ -75,6 +75,7 @@ my $magtype      = undef;
 my $catalog      = undef;
 my $contributor  = undef;
 my $updatedafter = undef;
+my $readable     = undef;
 my $secondary    = undef;
 my $orderbymag   = undef;
 
@@ -105,6 +106,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
                               'catalog|cat=s'     => \$catalog,
                               'contributor|con=s' => \$contributor,
 			      'updatedafter|ua=s' => \$updatedafter,
+                              'readable'          => \$readable,
                               'secondary'         => \$secondary,
 			      'orderbymag'        => \$orderbymag,
 
@@ -141,13 +143,13 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " --depth min:max   Specify a minimum and/or maximum depth in kilometers\n";
   print " --mag min:max     Specify a minimum and/or maximum magnitude\n";
   print " --magtype type    Specify a magnitude type for magnitude range limits\n";
-  print " --cat name        Limit to origins from specific catalog (e.g. ISC)\n";
-  print " --con name        Limit to origins from specific contributor (e.g. NEIC)\n";
+  print " --cat name        Limit to origins from specific catalog (e.g. ISC, PDE, GCMT)\n";
+  print " --con name        Limit to origins from specific contributor (e.g. ISC, NEIC)\n";
   print " --ua date         Limit to origins updated after date (YYYY-MM-DD)\n";
   print "\n";
+  print " --readable        Print output in a more readable form, default: more parsable\n";
   print " --secondary       Return secondary origins, default is only primary origins\n";
   print " --orderbymag      Order results by magnitude instead of time\n";
-
   print "\n";
   print " --printids        Include DMC IDs for events, origins and magnitudes\n";
   print " --evid id         Select a specific event by DMC event ID\n";
@@ -157,7 +159,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -A appname        Application/version string for identification\n";
 #  print " -a user:pass      User and password when authentication is needed\n";
   print "\n";
-  print " -o outfile        Write event information to specified file instead of printing\n";
+  print " -o outfile        Write event information to specified file, default: console\n";
   print "\n";
   exit 1;
 }
@@ -268,36 +270,66 @@ my $totalmags = 0;
 # Write to either specified output file or stdout
 my $eventfile = ( $outfile ) ? $outfile : "-";
 
+if ( scalar @eventids <= 0 ) {
+  printf STDERR "No events selected\n", scalar @eventids;
+}
+
+open (EVENT, ">$eventfile") || die "Cannot open event file '$eventfile': $!\n";
+
 # Write event information to stdout/console or a file if specified
-if ( $eventfile ) {
-  if ( scalar @eventids <= 0 ) {
-    printf STDERR "No events selected\n", scalar @eventids;
-  }
-  else {
-    open (EVENT, ">$eventfile") || die "Cannot open event file '$eventfile': $!\n";
+if ( defined $readable ) {
 
-    foreach my $eventid ( @eventids ) {
-      $totalevents++;
-      printf EVENT "EVENT $eventname{$eventid}%s\n", (defined $printids) ? " eventid=$eventid":"";
+CHAD, need one line outputs...
 
-      foreach my $origin ( @{$origins{$eventid}} ) {
-	$totalorigins++;
-	my ($originid, $originline) = split(/,/,$origin,2);
-	printf EVENT " %sORIGIN $originline%s\n",
-	       ($originid == $eventprime{$eventid}) ? "*" : " ",
-	       (defined $printids) ? " originid=$originid":"";
-      }
+  foreach my $eventid ( @eventids ) {
+    $totalevents++;
+    printf EVENT "EVENT $eventname{$eventid}%s\n", (defined $printids) ? " eventid=$eventid":"";
 
-      foreach my $mag ( @{$mags{$eventid}} ) {
-	$totalmags++;
-	my ($magid, $magline) = split(/,/,$mag,2);
-	printf EVENT "  MAGNITUDE $magline%s\n", (defined $printids) ? " magnitudeid=$magid":"";
-      }
+    # Generate list of origin IDs with primary origin first
+    my @originids = $eventprime{$eventid};
+    foreach my $originid ( keys %{$origins{$eventid}} ) {
+      push (@originids, $originid) if ( $originid != $eventprime{$eventid} );
     }
 
-    close EVENT;
+    # Print origin lines
+    foreach my $originid ( @originids ) {
+      $totalorigins++;
+      print EVENT "  ORIGIN $origins{$eventid}{$originid} originid=$originid\n";
+    }
+
+    # Print magnitude lines
+    foreach my $magid ( keys %{$mags{$eventid}} ) {
+      $totalmags++;
+      print EVENT "  MAGNITUDE $mags{$eventid}{$magid}  magnitudeid=$magid\n";
+    }
   }
 }
+else {
+  foreach my $eventid ( @eventids ) {
+    $totalevents++;
+    printf EVENT "EVENT $eventname{$eventid}%s\n", (defined $printids) ? " eventid=$eventid":"";
+
+    # Generate list of origin IDs with primary origin first
+    my @originids = $eventprime{$eventid};
+    foreach my $originid ( keys %{$origins{$eventid}} ) {
+      push (@originids, $originid) if ( $originid != $eventprime{$eventid} );
+    }
+
+    # Print origin lines
+    foreach my $originid ( @originids ) {
+      $totalorigins++;
+      print EVENT "  ORIGIN $origins{$eventid}{$originid} originid=$originid\n";
+    }
+
+    # Print magnitude lines
+    foreach my $magid ( keys %{$mags{$eventid}} ) {
+      $totalmags++;
+      print EVENT "  MAGNITUDE $mags{$eventid}{$magid}  magnitudeid=$magid\n";
+    }
+  }
+}
+
+close EVENT;
 
 if ( $verbose && scalar @eventids > 0 ) {
   printf STDERR "Selected %d events (%d origins, %d magnitudes)\n",
@@ -551,7 +583,7 @@ sub FetchEvents {
       if ( $indescription && $element->{Name} eq "text" ) { $intext = 0; }
 
       if ( $element->{Name} eq "origin" ) {
-	push (@{$origins{$eventid}}, "$originid,$time,$lat,$lon,$depth,$author,$catalog,$contributor");
+	$origins{$eventid}{$originid} = "$time,$lat,$lon,$depth,$author,$catalog,$contributor";
         $totalorigins++;
 	
 	($originid,$catalog,$contributor,$time,$lat,$lon,$depth,$author) = (undef) x 8;
@@ -559,7 +591,7 @@ sub FetchEvents {
       }
 
       if ( $element->{Name} eq "magnitude" ) {
-	push (@{$mags{$eventid}}, "$magnitudeid,$mag,$magtype,$magauthor");
+	$mags{$eventid}{$magnitudeid} = "$mag,$magtype,$magauthor";
 
 	($magnitudeid,$mag,$magtype,$magauthor) = (undef) x 4;
 	$inmagnitude = 0;
