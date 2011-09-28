@@ -20,7 +20,17 @@
 # 2011.161:
 #  - Initial version.
 #
+# 2011.270
+#  - Allow start and end times to be indenpendently specified.
+#  - Reorganize lat, lon, depth and mag range options to compact form that
+#     that matches other Fetch scripts.
+#  - Add --radius option for selecting a circular region.
+#  - Add --magtype option.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
+
+# CHAD, Need description of fields
+
 
 use strict;
 use File::Basename;
@@ -30,7 +40,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.161";
+my $version = "2011.270";
 
 my $scriptname = basename($0);
 
@@ -45,21 +55,19 @@ my $verbose      = undef;
 
 my $starttime    = undef;
 my $endtime      = undef;
-my $minlat       = undef;
-my $maxlat       = undef;
-my $minlon       = undef;
-my $maxlon       = undef;
-my $mindepth     = undef;
-my $maxdepth     = undef;
-my $minmag       = undef;
-my $maxmag       = undef;
-
+my @latrange     = ();      # (minlat:maxlat)
+my @lonrange     = ();      # (minlon:maxlon)
+my @degrange     = ();      # (lat:lon:maxradius[:minradius])
+my @deprange     = ();      # (mindepth:maxdepth)
+my @magrange     = ();      # (minmag:maxmag)
+my $magtype      = undef;
 my $catalog      = undef;
 my $contributor  = undef;
 my $updatedafter = undef;
 my $secondary    = undef;
 my $orderbymag   = undef;
 
+my $printids     = undef;
 my $eventid      = undef;
 my $originid     = undef;
 
@@ -77,22 +85,19 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
 
 			      'starttime|s=s'     => \$starttime,
 			      'endtime|e=s'       => \$endtime,
-
-                              'minlat=s'          => \$minlat,
-                              'maxlat=s'          => \$maxlat,
-                              'minlon=s'          => \$minlon,
-                              'maxlon=s'          => \$maxlon,
-                              'mindepth=s'        => \$mindepth,
-                              'maxdepth=s'        => \$maxdepth,
-                              'minmag=s'          => \$minmag,
-                              'maxmag=s'          => \$maxmag,
-
+			      'lat=s'             => \@latrange,
+                              'lon=s'             => \@lonrange,
+                              'radius=s'          => \@degrange,
+			      'depth=s'           => \@deprange,
+			      'mag=s'             => \@magrange,
+			      'magtype=s'         => \$magtype,
                               'catalog|cat=s'     => \$catalog,
                               'contributor|con=s' => \$contributor,
 			      'updatedafter|ua=s' => \$updatedafter,
                               'secondary'         => \$secondary,
 			      'orderbymag'        => \$orderbymag,
 
+			      'printids'          => \$printids,
 			      'eventid|evid=s'    => \$eventid,
 			      'originid|orid=s'   => \$originid,
 
@@ -104,10 +109,8 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
 			    );
 
 my $required =  ( defined $starttime || defined $endtime ||
-                  defined $minlat || defined $maxlat ||
-                  defined $minlon || defined $maxlon ||
-                  defined $mindepth || defined $maxdepth ||
-                  defined $minmag || defined $maxmag ||
+                  scalar @latrange || scalar @lonrange  || scalar @degrange ||
+		  scalar @deprange || scalar @magrange ||
                   defined $catalog || defined $contributor ||
                   defined $eventid || defined $originid );
 
@@ -116,18 +119,17 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print "http://www.iris.edu/ws/wsclients/\n\n";
   print "Usage: $scriptname [options]\n\n";
   print " Options:\n";
-  print " -v                Increase verbosity, may be specified multiple times\n";
+  print " -v                More verbosity, may be specified multiple times (-vv, -vvv)\n";
   print "\n";
   print " -s starttime      Limit to origins after time (YYYY-MM-DD,HH:MM:SS)\n";
   print " -e endtime        Limit to origins before time (YYYY-MM-DD,HH:MM:SS)\n";
-  print " --minlat lat      Minimum latitude (-90 to 90)\n";
-  print " --maxlat lat      Maximum latitude (-90 to 90)\n";
-  print " --minlon lon      Minimum longitude (-180 to 180)\n";
-  print " --maxlon lon      Maximum longitude (-180 to 180)\n";
-  print " --mindepth depth  Minimum depth in kilometers\n";
-  print " --maxdepth depth  Maximum depth in kilometers\n";
-  print " --minmag mag      Minimum magnitude\n";
-  print " --maxmag mag      Maximum magnitude\n";
+  print " --lat min:max     Specify a minimum and/or maximum latitude range\n";
+  print " --lon min:max     Specify a minimum and/or maximum longitude range\n";
+  print " --radius lat:lon:maxradius[:minradius]\n";
+  print "                     Specify circular region with optional minimum radius\n";
+  print " --depth min:max   Specify a minimum and/or maximum depth in kilometers\n";
+  print " --mag min:max     Specify a minimum and/or maximum magnitude\n";
+  print " --magtype type    Specify a magnitude type for magnitude range limits\n";
   print " --cat name        Limit to origins from specific catalog (e.g. ISC)\n";
   print " --con name        Limit to origins from specific contributor (e.g. NEIC)\n";
   print " --ua date         Limit to origins updated after date (YYYY-MM-DD)\n";
@@ -136,6 +138,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " --orderbymag      Order results by magnitude instead of time\n";
 
   print "\n";
+  print " --printids        Include DMC IDs for events, origins and magnitudes\n";
   print " --evid id         Select a specific event by DMC event ID\n";
   print " --orid id         Select a specific event by DMC origin ID\n";
   print "\n";
@@ -170,9 +173,75 @@ if ( $updatedafter ) {
   $updatedafter = sprintf ("%04d-%02d-%02d", $year, $month, $mday);
 }
 
+# Validate and prepare lat, lon and radius input
+if ( scalar @latrange ) {
+  @latrange = split (/:/, $latrange[0]);
+
+  if ( $latrange[0] && ($latrange[0] < -90.0 || $latrange[0] > 90.0) ) {
+    die "Minimum latitude out of range: $latrange[0]\n";
+  }
+  if ( $latrange[1] && ($latrange[1] < -90.0 || $latrange[1] > 90.0) ) {
+    die "Maximum latitude out of range: $latrange[1]\n";
+  }
+}
+if ( scalar @lonrange ) {
+  @lonrange = split (/\:/, $lonrange[0]);
+
+  if ( $lonrange[0] && ($lonrange[0] < -180.0 || $lonrange[0] > 180.0) ) {
+    die "Minimum longitude out of range: $lonrange[0]\n";
+  }
+  if ( $lonrange[1] && ($lonrange[1] < -180.0 || $lonrange[1] > 180.0) ) {
+    die "Maximum longitude out of range: $lonrange[1]\n";
+  }
+}
+if ( scalar @degrange ) {
+  @degrange = split (/\:/, $degrange[0]);
+
+  if ( scalar @degrange < 3 || scalar @degrange > 4 ) {
+    die "Unrecognized radius specification: @degrange\n";
+  }
+  if ( $degrange[0] && ($degrange[0] < -90.0 || $degrange[0] > 90.0) ) {
+    die "Radius latitude out of range: $degrange[0]\n";
+  }
+  if ( $degrange[1] && ($degrange[1] < -180.0 || $degrange[1] > 180.0) ) {
+    die "Radius longitude out of range: $degrange[1]\n";
+  }
+}
+if ( scalar @deprange ) {
+  @deprange = split (/\:/, $deprange[0]);
+
+  if ( $deprange[0] && ($deprange[0] < -7000 || $deprange[0] > 7000) ) {
+    die "Minimum depth out of range: $deprange[0]\n";
+  }
+  if ( $deprange[1] && ($deprange[1] < -7000 || $deprange[1] > 7000) ) {
+    die "Maximum depth out of range: $deprange[1]\n";
+  }
+}
+if ( scalar @magrange ) {
+  @magrange = split (/\:/, $magrange[0]);
+
+  if ( $magrange[0] && ($magrange[0] < -50 || $magrange[0] > 15) ) {
+    die "Minimum magnitude out of range: $magrange[0]\n";
+  }
+  if ( $magrange[1] && ($magrange[1] < -50 || $magrange[1] > 15) ) {
+    die "Maximum magnitude out of range: $magrange[1]\n";
+  }
+}
+
+
+# Report complete data selection criteria
+if ( $verbose > 2 ) {
+  print STDERR "Latitude range: $latrange[0] : $latrange[1]\n" if ( scalar @latrange );
+  print STDERR "Longitude range: $lonrange[0] : $lonrange[1]\n" if ( scalar @lonrange );
+  print STDERR "Radius range: $degrange[0] : $degrange[1] : $degrange[2] : $degrange[3]\n" if ( scalar @degrange );
+  print STDERR "Depth range: $deprange[0] : $deprange[1]\n" if ( scalar @deprange );
+  print STDERR "Magnitude range: $magrange[0] : $magrange[1]\n" if ( scalar @magrange );
+}
+
 # Containers to hold event, origin and magnitude details
 my @eventids = ();
 my %eventname = ();
+my %eventprime = ();
 my %origins = ();
 my %mags = ();
 
@@ -198,16 +267,18 @@ if ( $eventfile ) {
 
     foreach my $eventid ( @eventids ) {
       $totalevents++;
-      print EVENT "$eventid - $eventname{$eventid}\n";
+      printf EVENT "EVENT $eventname{$eventid}%s\n", (defined $printids) ? " eventid=$eventid":"";
 
       foreach my $origin ( @{$origins{$eventid}} ) {
 	$totalorigins++;
-	print EVENT "  $origin\n";
+	my ($originid, $originline) = split(/,/,$origin,2);
+	printf EVENT "  ORIGIN $originline%s\n", (defined $printids) ? " originid=$originid":"";
       }
 
       foreach my $mag ( @{$mags{$eventid}} ) {
 	$totalmags++;
-	print EVENT "  $mag\n";
+	my ($magid, $magline) = split(/,/,$mag,2);
+	printf EVENT "  MAGNITUDE $magline%s\n", (defined $printids) ? " magnitudeid=$magid":"";
       }
     }
 
@@ -232,6 +303,7 @@ print STDERR "DONE\n";
 # Resulting information is placed in the following global structures:
 #   @eventids - an array containing the returned event IDs in order
 #   %eventname
+#   %eventprime
 #   %origins
 #   %mags
 #
@@ -244,18 +316,31 @@ sub FetchEvents {
   # Create web service URI
   my $uri = "${eventservice}?";
   $uri .= "orderby="; $uri .= ($orderbymag) ? "magnitude" : "time";
-  if ( $starttime && $endtime ) {
-    $uri .= "&timewindow=${starttime},${endtime}";
+  $uri .= "&starttime=$starttime" if ( $starttime );
+  $uri .= "&endtime=$endtime" if ( $endtime );
+  if ( scalar @latrange ) {
+    $uri .= "&minlat=$latrange[0]" if ( $latrange[0] );
+    $uri .= "&maxlat=$latrange[1]" if ( $latrange[1] );
   }
-  $uri .= "&minlat=$minlat" if ( $minlat );
-  $uri .= "&maxlat=$maxlat" if ( $maxlat );
-  $uri .= "&minlon=$minlon" if ( $minlon );
-  $uri .= "&maxlon=$maxlon" if ( $maxlon );
-  $uri .= "&mindepth=$mindepth" if ( $mindepth );
-  $uri .= "&maxdepth=$maxdepth" if ( $maxdepth );
-  $uri .= "&minmag=$minmag" if ( $minmag );
-  $uri .= "&maxmag=$maxmag" if ( $maxmag );
-
+  if ( scalar @lonrange ) {
+    $uri .= "&minlon=$lonrange[0]" if ( $lonrange[0] );
+    $uri .= "&maxlon=$lonrange[1]" if ( $lonrange[1] );
+  }
+  if ( scalar @degrange ) {
+    $uri .= "&lat=$degrange[0]" if ( $degrange[0] );
+    $uri .= "&lon=$degrange[1]" if ( $degrange[1] );
+    $uri .= "&maxradius=$degrange[2]" if ( $degrange[2] );
+    $uri .= "&minradius=$degrange[3]" if ( $degrange[3] );
+  }
+  if ( scalar @deprange ) {
+    $uri .= "&mindepth=$deprange[0]" if ( $deprange[0] );
+    $uri .= "&maxdepth=$deprange[1]" if ( $deprange[1] );
+  }
+  if ( scalar @lonrange ) {
+    $uri .= "&minmag=$magrange[0]" if ( $magrange[0] );
+    $uri .= "&maxmag=$magrange[1]" if ( $magrange[1] );
+  }
+  $uri .= "&magtype=$magtype" if ( $magtype );
   $uri .= "&catalog=$catalog" if ( $catalog );
   $uri .= "&contributor=$contributor" if ( $contributor );
   $uri .= "&updatedafter=$updatedafter" if ( $updatedafter );
@@ -435,7 +520,8 @@ sub FetchEvents {
     if ( $element->{Name} eq "event" ) {
       push (@eventids, $eventid);
 
-      $eventname{$eventid} = "$name|$porigin";
+      $eventname{$eventid} = $name;
+      $eventprime{$eventid} = $porigin;
       $totalevents++;
 
       ($name,$eventid,$porigin) = (undef) x 3;
