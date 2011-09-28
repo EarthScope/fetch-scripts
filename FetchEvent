@@ -15,6 +15,20 @@
 # Installation of the XML::SAX::ExpatXS module can significantly
 # speed up the parsing of results returned as XML.
 #
+# The returned XML event information is parsed and printed to the
+# console or a file in the following pattern:
+#
+# EVENT <event location name>
+#  *ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor>
+#   MAGNITUDE <magvalue>,<magtype>,<author>
+#
+# An EVENT can be followed by multiple ORIGIN lines if the --secondary
+# option is specified and the primary origin is prefixed with a '*'.
+# An EVENT may also be followed by one or more MAGNITUDE lines.
+#
+# If the --printids option is specified each line will be followed by tags
+# that include the DMC interal identifiers for event, origin and magnitude.
+#
 # ## Change history ##
 #
 # 2011.161:
@@ -28,9 +42,6 @@
 #  - Add --magtype option.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
-
-# CHAD, Need description of fields
-
 
 use strict;
 use File::Basename;
@@ -257,7 +268,7 @@ my $totalmags = 0;
 # Write to either specified output file or stdout
 my $eventfile = ( $outfile ) ? $outfile : "-";
 
-# Write event information to file
+# Write event information to stdout/console or a file if specified
 if ( $eventfile ) {
   if ( scalar @eventids <= 0 ) {
     printf STDERR "No events selected\n", scalar @eventids;
@@ -272,7 +283,9 @@ if ( $eventfile ) {
       foreach my $origin ( @{$origins{$eventid}} ) {
 	$totalorigins++;
 	my ($originid, $originline) = split(/,/,$origin,2);
-	printf EVENT "  ORIGIN $originline%s\n", (defined $printids) ? " originid=$originid":"";
+	printf EVENT " %sORIGIN $originline%s\n",
+	       ($originid == $eventprime{$eventid}) ? "*" : " ",
+	       (defined $printids) ? " originid=$originid":"";
       }
 
       foreach my $mag ( @{$mags{$eventid}} ) {
