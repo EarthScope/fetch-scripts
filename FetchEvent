@@ -28,7 +28,7 @@
 # contained on a single line along with all magnitude estimates
 # associated with the event.
 #
-# The "readable" output (the -readable option) follows this pattern:
+# The "alternate" output (the -altform option) follows this pattern:
 # EVENT <event location name> eventid=<eventID>
 #   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor> originid=<originID>
 #   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor> originid=<originID>
@@ -51,8 +51,9 @@
 #  - Add --radius option for selecting a circular region.
 #  - Add --magtype option.
 #
-# 2011.271:
-#  - Add the --readable option and default to a parsable output format.
+# 2011.272:
+#  - Reorganize default output for easy reading and hopefully easy parsing.
+#  - Add the --altform option (unadvertised).
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -64,7 +65,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.271";
+my $version = "2011.272";
 
 my $scriptname = basename($0);
 
@@ -88,7 +89,7 @@ my $magtype      = undef;
 my $catalog      = undef;
 my $contributor  = undef;
 my $updatedafter = undef;
-my $readable     = undef;
+my $altform      = undef;
 my $secondary    = undef;
 my $orderbymag   = undef;
 
@@ -118,7 +119,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
                               'catalog|cat=s'     => \$catalog,
                               'contributor|con=s' => \$contributor,
 			      'updatedafter|ua=s' => \$updatedafter,
-                              'readable'          => \$readable,
+                              'altform'           => \$altform,
                               'secondary'         => \$secondary,
 			      'orderbymag'        => \$orderbymag,
 
@@ -158,7 +159,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " --con name        Limit to origins from specific contributor (e.g. ISC, NEIC)\n";
   print " --ua date         Limit to origins updated after date (YYYY-MM-DD)\n";
   print "\n";
-  print " --readable        Print output in a more readable form, default: more parsable\n";
+#  print " --altform         Print output in an alternate form, default is more parsable\n";
   print " --secondary       Return secondary origins, default is only primary origins\n";
   print " --orderbymag      Order results by magnitude instead of time\n";
   print "\n";
@@ -287,72 +288,78 @@ if ( scalar @eventids <= 0 ) {
 open (EVENT, ">$eventfile") || die "Cannot open event file '$eventfile': $!\n";
 
 # Write event information to stdout/console or a file if specified
-if ( ! defined $readable ) {
+if ( ! defined $altform ) {
   # Parsable lines, one event line with primary origin, fields delimited with '|':
-  # EventID|EventLocationName|OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor|MagType MagValue (MagAuthor)|MagType MagValue (MagAuthor)
-  #   OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor
+  # EventID|OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor,ContribEventID|MagType,MagValue,MagAuthor|MagType,MagValue,MagAuthor|...|EventLocationName
+  #         OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor,ContribEventID
 
   foreach my $eventid ( @eventids ) {
     $totalevents++;
-    printf EVENT "$eventid|$eventname{$eventid}";
 
-    # Generate list of origin IDs with primary origin first
-    my @originids = $eventprime{$eventid};
-    foreach my $originid ( keys %{$origins{$eventid}} ) {
+    # Print IRIS event ID
+    printf EVENT "%-8s", $eventid;
+
+    # Generate list of origin IDs with primary origin first and others sorted on ascending time
+    my @originids = ($eventprime{$eventid});
+    foreach my $originid ( sort { ${$origins{$eventid}{$b}}[0] cmp ${$origins{$eventid}{$a}}[0] } keys %{$origins{$eventid}} ) {
       push (@originids, $originid) if ( $originid != $eventprime{$eventid} );
     }
     $totalorigins += scalar @originids;
 
     # Print first/primary origin
-    my $originline = $origins{$eventid}{$originids[0]};
-    $originline =~ s/\,/\|/g;
-    print EVENT "|$originline";
+    my ($time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = @{$origins{$eventid}{$originids[0]}};
+    printf (EVENT "|%-24s|%-11s|%-10s|%-7s|%s|%s|%s%s",
+	    $time,&decimalposition($lat,3),&decimalposition($lon,4),&decimalposition($depth,5),
+	    $author,$catalog,$contributor,($contributoreventid)?",$contributoreventid":"");
 
     # Print magnitudes
-    foreach my $magid ( keys %{$mags{$eventid}} ) {
+    foreach my $magnitudeid ( keys %{$mags{$eventid}} ) {
       $totalmags++;
-      my ($magvalue,$magtype,$magauthor) = split(/,/, $mags{$eventid}{$magid});
-      print EVENT "|$magtype $magvalue ($magauthor)";
+      print EVENT "|" . join (',', @{$mags{$eventid}{$magnitudeid}});
     }
 
-    print EVENT "\n";
+    # Print event name and newline
+    printf EVENT "|$eventname{$eventid}\n";
 
     # Print secondary origin lines
     foreach my $originid ( @originids[1..$#originids] ) {
-      my $originline = $origins{$eventid}{$originids[0]};
-      $originline =~ s/\,/\|/g;
-      print EVENT "  $originline\n";
+      my ($time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = @{$origins{$eventid}{$originid}};
+      printf (EVENT "         %-24s|%-11s|%-10s|%-7s|%s|%s|%s%s\n",
+	      $time,&decimalposition($lat,3),&decimalposition($lon,4),&decimalposition($depth,5),
+	      $author,$catalog,$contributor,($contributoreventid)?",$contributoreventid":"");
     }
   }
 }
 else {
-  # Readable lines, primary origin is first:
-  # EVENT <event location name>
-  #   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor>
-  #   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor>
-  #   MAGNITUDE <magvalue>,<magtype>,<author>
-  #   MAGNITUDE <magvalue>,<magtype>,<author>
+  # Alternate lines, primary origin is first:
+  # EVENT <event location name> eventid=<eventid>
+  #   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor> originid=<originid>
+  #   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor> originid=<originid>
+  #   MAGNITUDE <magtype>,<magvalue>,<author> magnitudeid=<magnitudeid>
+  #   MAGNITUDE <magtype>,<magvalue>,<author> magnitudeid=<magnitudeid>
 
   foreach my $eventid ( @eventids ) {
     $totalevents++;
     printf EVENT "EVENT $eventname{$eventid} eventid=$eventid\n";
 
-    # Generate list of origin IDs with primary origin first
-    my @originids = $eventprime{$eventid};
-    foreach my $originid ( keys %{$origins{$eventid}} ) {
+    # Generate list of origin IDs with primary origin firstand others sorted on ascending time
+    my @originids = ($eventprime{$eventid});
+    foreach my $originid ( sort { ${$origins{$eventid}{$b}}[0] cmp ${$origins{$eventid}{$a}}[0] } keys %{$origins{$eventid}} ) {
       push (@originids, $originid) if ( $originid != $eventprime{$eventid} );
     }
 
     # Print origin lines
     foreach my $originid ( @originids ) {
       $totalorigins++;
-      print EVENT "  ORIGIN $origins{$eventid}{$originid} originid=$originid\n";
+      my ($time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = @{$origins{$eventid}{$originid}};
+      printf EVENT "  ORIGIN %s,%s,%s,%s,%s,%s,%s originid=$originid\n",
+	$time,$lat,$lon,$depth,$author,$catalog,$contributor;
     }
 
     # Print magnitude lines
-    foreach my $magid ( keys %{$mags{$eventid}} ) {
+    foreach my $magnitudeid ( keys %{$mags{$eventid}} ) {
       $totalmags++;
-      print EVENT "  MAGNITUDE $mags{$eventid}{$magid}  magnitudeid=$magid\n";
+      print EVENT "  MAGNITUDE " . join (',', @{$mags{$eventid}{$magnitudeid}}) . " magnitudeid=$magnitudeid\n";
     }
   }
 }
@@ -366,6 +373,18 @@ if ( $verbose && scalar @eventids > 0 ) {
 
 print STDERR "DONE\n";
 ## End of main
+
+
+######################################################################
+# decimalposition:
+# Return a string padded with spaces such that the decimal is at the
+# specified position in the string.
+######################################################################
+sub decimalposition { # decimalposition (value, position)
+  my ($value, $position) = @_;
+  my $idx = index ($value, '.');
+  return sprintf "%*s$value", ($position - $idx);
+}  # End of decimalposition()
 
 
 ######################################################################
@@ -525,13 +544,15 @@ sub FetchEvents {
 
   my $name = undef;
 
-  my ($name,$eventid,$originid,$magnitudeid,$porigin,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$mag,$magtype,$magauthor) = (undef) x 15;
+  my ($name,$eventid,$originid,$porigin,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = (undef) x 12;
+  my ($magnitudeid,$mag,$magtype,$magauthor) = (undef) x 4;
 
   sub start_element {
     my ($self,$element) = @_;
 
     if ( $element->{Name} eq "event" ) {
-      ($name,$eventid,$originid,$magnitudeid,$porigin,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$mag,$magtype,$magauthor) = (undef) x 15;
+      ($name,$eventid,$originid,$porigin,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = (undef) x 12;
+      ($magnitudeid,$mag,$magtype,$magauthor) = (undef) x 4;
 
       my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
       ($eventid) = $publicid =~ /.*eventId\=(\d+)$/;
@@ -553,6 +574,7 @@ sub FetchEvents {
 	foreach my $key (keys %{$element->{Attributes}}) {
           $catalog = $element->{Attributes}->{$key}->{Value} if ( $key =~ /^\{.*\}catalog$/ );
           $contributor = $element->{Attributes}->{$key}->{Value} if ( $key =~ /^\{.*\}contributor$/ );
+          $contributoreventid = $element->{Attributes}->{$key}->{Value} if ( $key =~ /^\{.*\}contributorEventId$/ );
 	}
 
 	$inorigin = 1;
@@ -611,15 +633,19 @@ sub FetchEvents {
       if ( $indescription && $element->{Name} eq "text" ) { $intext = 0; }
 
       if ( $element->{Name} eq "origin" ) {
-	$origins{$eventid}{$originid} = "$time,$lat,$lon,$depth,$author,$catalog,$contributor";
+	# Convert ISO exchange time to something slightly more readable
+	$time =~ s/\-/\//g;
+        $time =~ s/T/ /;
+
+	@{$origins{$eventid}{$originid}} = ($time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid);
         $totalorigins++;
 	
-	($originid,$catalog,$contributor,$time,$lat,$lon,$depth,$author) = (undef) x 8;
+	($originid,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = (undef) x 9;
 	$inorigin = 0;
       }
 
       if ( $element->{Name} eq "magnitude" ) {
-	$mags{$eventid}{$magnitudeid} = "$mag,$magtype,$magauthor";
+	@{$mags{$eventid}{$magnitudeid}} = ($magtype,$mag,$magauthor);
 
 	($magnitudeid,$mag,$magtype,$magauthor) = (undef) x 4;
 	$inmagnitude = 0;
