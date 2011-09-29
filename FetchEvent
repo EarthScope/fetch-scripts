@@ -16,30 +16,43 @@
 # speed up the parsing of results returned as XML.
 #
 # The returned XML event information is parsed and printed to the
-# console or a file in the following pattern:
+# console or a file in the following ways:
 #
-# EVENT <event location name>
-#  *ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor>
-#   MAGNITUDE <magvalue>,<magtype>,<author>
+# The default "parsable" output includes fields separated by vertical
+# bars (|) and follows this pattern:
+#
+# EventID|EventLocationName|OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor|MagType MagValue (MagAuthor)|MagType MagValue (MagAuthor)
+#   OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor
+#
+# The event ID and name along with the primary origin details are all
+# contained on a single line along with all magnitude estimates
+# associated with the event.
+#
+# The "readable" output (the -readable option) follows this pattern:
+# EVENT <event location name> eventid=<eventID>
+#   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor> originid=<originID>
+#   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor> originid=<originID>
+#   MAGNITUDE <magvalue>,<magtype>,<author> magnitudeid=<magnitudeID>
+#   MAGNITUDE <magvalue>,<magtype>,<author> magnitudeid=<magnitudeID>
 #
 # An EVENT can be followed by multiple ORIGIN lines if the --secondary
-# option is specified and the primary origin is prefixed with a '*'.
-# An EVENT may also be followed by one or more MAGNITUDE lines.
-#
-# If the --printids option is specified each line will be followed by tags
-# that include the DMC interal identifiers for event, origin and magnitude.
+# option is specified and the primary origin is listed first.  An
+# EVENT may also be followed by one or more MAGNITUDE lines.
 #
 # ## Change history ##
 #
 # 2011.161:
 #  - Initial version.
 #
-# 2011.270
+# 2011.270:
 #  - Allow start and end times to be indenpendently specified.
 #  - Reorganize lat, lon, depth and mag range options to compact form that
 #     that matches other Fetch scripts.
 #  - Add --radius option for selecting a circular region.
 #  - Add --magtype option.
+#
+# 2011.271:
+#  - Add the --readable option and default to a parsable output format.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -51,7 +64,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.270";
+my $version = "2011.271";
 
 my $scriptname = basename($0);
 
@@ -79,7 +92,6 @@ my $readable     = undef;
 my $secondary    = undef;
 my $orderbymag   = undef;
 
-my $printids     = undef;
 my $eventid      = undef;
 my $originid     = undef;
 
@@ -110,7 +122,6 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
                               'secondary'         => \$secondary,
 			      'orderbymag'        => \$orderbymag,
 
-			      'printids'          => \$printids,
 			      'eventid|evid=s'    => \$eventid,
 			      'originid|orid=s'   => \$originid,
 
@@ -151,7 +162,6 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " --secondary       Return secondary origins, default is only primary origins\n";
   print " --orderbymag      Order results by magnitude instead of time\n";
   print "\n";
-  print " --printids        Include DMC IDs for events, origins and magnitudes\n";
   print " --evid id         Select a specific event by DMC event ID\n";
   print " --orid id         Select a specific event by DMC origin ID\n";
   print "\n";
@@ -277,37 +287,55 @@ if ( scalar @eventids <= 0 ) {
 open (EVENT, ">$eventfile") || die "Cannot open event file '$eventfile': $!\n";
 
 # Write event information to stdout/console or a file if specified
-if ( defined $readable ) {
-
-CHAD, need one line outputs...
+if ( ! defined $readable ) {
+  # Parsable lines, one event line with primary origin, fields delimited with '|':
+  # EventID|EventLocationName|OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor|MagType MagValue (MagAuthor)|MagType MagValue (MagAuthor)
+  #   OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor
 
   foreach my $eventid ( @eventids ) {
     $totalevents++;
-    printf EVENT "EVENT $eventname{$eventid}%s\n", (defined $printids) ? " eventid=$eventid":"";
+    printf EVENT "$eventid|$eventname{$eventid}";
 
     # Generate list of origin IDs with primary origin first
     my @originids = $eventprime{$eventid};
     foreach my $originid ( keys %{$origins{$eventid}} ) {
       push (@originids, $originid) if ( $originid != $eventprime{$eventid} );
     }
+    $totalorigins += scalar @originids;
 
-    # Print origin lines
-    foreach my $originid ( @originids ) {
-      $totalorigins++;
-      print EVENT "  ORIGIN $origins{$eventid}{$originid} originid=$originid\n";
-    }
+    # Print first/primary origin
+    my $originline = $origins{$eventid}{$originids[0]};
+    $originline =~ s/\,/\|/g;
+    print EVENT "|$originline";
 
-    # Print magnitude lines
+    # Print magnitudes
     foreach my $magid ( keys %{$mags{$eventid}} ) {
       $totalmags++;
-      print EVENT "  MAGNITUDE $mags{$eventid}{$magid}  magnitudeid=$magid\n";
+      my ($magvalue,$magtype,$magauthor) = split(/,/, $mags{$eventid}{$magid});
+      print EVENT "|$magtype $magvalue ($magauthor)";
+    }
+
+    print EVENT "\n";
+
+    # Print secondary origin lines
+    foreach my $originid ( @originids[1..$#originids] ) {
+      my $originline = $origins{$eventid}{$originids[0]};
+      $originline =~ s/\,/\|/g;
+      print EVENT "  $originline\n";
     }
   }
 }
 else {
+  # Readable lines, primary origin is first:
+  # EVENT <event location name>
+  #   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor>
+  #   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor>
+  #   MAGNITUDE <magvalue>,<magtype>,<author>
+  #   MAGNITUDE <magvalue>,<magtype>,<author>
+
   foreach my $eventid ( @eventids ) {
     $totalevents++;
-    printf EVENT "EVENT $eventname{$eventid}%s\n", (defined $printids) ? " eventid=$eventid":"";
+    printf EVENT "EVENT $eventname{$eventid} eventid=$eventid\n";
 
     # Generate list of origin IDs with primary origin first
     my @originids = $eventprime{$eventid};
