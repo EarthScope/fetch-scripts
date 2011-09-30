@@ -56,6 +56,9 @@
 #  - Reorganize default output for easy reading and hopefully easy parsing.
 #  - Add the --altform option (unadvertised).
 #
+# 2011.273:
+#  - Fix magnitude selection.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -253,8 +256,7 @@ if ( scalar @magrange ) {
   }
 }
 
-
-# Report complete data selection criteria
+# Report data selection criteria
 if ( $verbose > 2 ) {
   print STDERR "Latitude range: $latrange[0] : $latrange[1]\n" if ( scalar @latrange );
   print STDERR "Longitude range: $lonrange[0] : $lonrange[1]\n" if ( scalar @lonrange );
@@ -429,7 +431,7 @@ sub FetchEvents {
     $uri .= "&mindepth=$deprange[0]" if ( $deprange[0] );
     $uri .= "&maxdepth=$deprange[1]" if ( $deprange[1] );
   }
-  if ( scalar @lonrange ) {
+  if ( scalar @magrange ) {
     $uri .= "&minmag=$magrange[0]" if ( $magrange[0] );
     $uri .= "&maxmag=$magrange[1]" if ( $magrange[1] );
   }
