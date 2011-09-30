@@ -21,19 +21,20 @@
 # The default "parsable" output includes fields separated by vertical
 # bars (|) and follows this pattern:
 #
-# EventID|EventLocationName|OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor|MagType MagValue (MagAuthor)|MagType MagValue (MagAuthor)
-#   OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor
+# EventID|OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor,ContribEventID|MagType,MagValue,MagAuthor|MagType,MagValue,MagAuthor|...|EventLocationName
+#         OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor,ContribEventID
 #
-# The event ID and name along with the primary origin details are all
-# contained on a single line along with all magnitude estimates
-# associated with the event.
+# The event ID and the primary origin details are all contained on a single
+# line along with all magnitude estimates associated with the event.
+# Secondary origins, if requested, are listed below and indented to line up
+# with the equivalient fields of the primary origin.
 #
 # The "alternate" output (the -altform option) follows this pattern:
 # EVENT <event location name> eventid=<eventID>
 #   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor> originid=<originID>
 #   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor> originid=<originID>
-#   MAGNITUDE <magvalue>,<magtype>,<author> magnitudeid=<magnitudeID>
-#   MAGNITUDE <magvalue>,<magtype>,<author> magnitudeid=<magnitudeID>
+#   MAGNITUDE <magtype>,<magvalue>,<author> magnitudeid=<magnitudeID>
+#   MAGNITUDE <magtype>,<magvalue>,<author> magnitudeid=<magnitudeID>
 #
 # An EVENT can be followed by multiple ORIGIN lines if the --secondary
 # option is specified and the primary origin is listed first.  An
