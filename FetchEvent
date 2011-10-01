@@ -303,11 +303,13 @@ if ( ! defined $altform ) {
     printf EVENT "%-8s", $eventid;
 
     # Generate list of origin IDs with primary origin first and others sorted on ascending time
-    my @originids = ($eventprime{$eventid});
+    my @originids = (exists $origins{$eventid}{$eventprime{$eventid}}) ? ($eventprime{$eventid}) : ();
     foreach my $originid ( sort { ${$origins{$eventid}{$b}}[0] cmp ${$origins{$eventid}{$a}}[0] } keys %{$origins{$eventid}} ) {
       push (@originids, $originid) if ( $originid != $eventprime{$eventid} );
     }
     $totalorigins += scalar @originids;
+
+    printf STDERR "TOTAL ORIGINS ($eventid): %d\n", scalar @originids;
 
     # Print first/primary origin
     my ($time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = @{$origins{$eventid}{$originids[0]}};
@@ -346,7 +348,7 @@ else {
     printf EVENT "EVENT $eventname{$eventid} eventid=$eventid\n";
 
     # Generate list of origin IDs with primary origin firstand others sorted on ascending time
-    my @originids = ($eventprime{$eventid});
+    my @originids = (exists $origins{$eventid}{$eventprime{$eventid}}) ? ($eventprime{$eventid}) : ();
     foreach my $originid ( sort { ${$origins{$eventid}{$b}}[0] cmp ${$origins{$eventid}{$a}}[0] } keys %{$origins{$eventid}} ) {
       push (@originids, $originid) if ( $originid != $eventprime{$eventid} );
     }
