@@ -159,6 +159,9 @@
 #  - Add --lat, --lon and --radius selection options.
 #  - Fix handling for selections of multiple time windows.
 #
+# 2011.279:
+#  - Fixed handling of zeros in selections for latitude, longitude and magnitude.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -169,7 +172,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.216";
+my $version = "2011.279";
 
 my $scriptname = basename($0);
 
@@ -319,20 +322,20 @@ if ( $endtime ) {
 if ( scalar @latrange ) {
   @latrange = split (/:/, $latrange[0]);
 
-  if ( $latrange[0] && ($latrange[0] < -90.0 || $latrange[0] > 90.0) ) {
+  if ( defined $latrange[0] && ($latrange[0] < -90.0 || $latrange[0] > 90.0) ) {
     die "Minimum latitude out of range: $latrange[0]\n";
   }
-  if ( $latrange[1] && ($latrange[1] < -90.0 || $latrange[1] > 90.0) ) {
+  if ( defined $latrange[1] && ($latrange[1] < -90.0 || $latrange[1] > 90.0) ) {
     die "Maximum latitude out of range: $latrange[1]\n";
   }
 }
 if ( scalar @lonrange ) {
   @lonrange = split (/\:/, $lonrange[0]);
 
-  if ( $lonrange[0] && ($lonrange[0] < -180.0 || $lonrange[0] > 180.0) ) {
+  if ( defined $lonrange[0] && ($lonrange[0] < -180.0 || $lonrange[0] > 180.0) ) {
     die "Minimum longitude out of range: $lonrange[0]\n";
   }
-  if ( $lonrange[1] && ($lonrange[1] < -180.0 || $lonrange[1] > 180.0) ) {
+  if ( defined $lonrange[1] && ($lonrange[1] < -180.0 || $lonrange[1] > 180.0) ) {
     die "Maximum longitude out of range: $lonrange[1]\n";
   }
 }
@@ -342,10 +345,10 @@ if ( scalar @degrange ) {
   if ( scalar @degrange < 3 || scalar @degrange > 4 ) {
     die "Unrecognized radius specification: @degrange\n";
   }
-  if ( $degrange[0] && ($degrange[0] < -90.0 || $degrange[0] > 90.0) ) {
+  if ( defined $degrange[0] && ($degrange[0] < -90.0 || $degrange[0] > 90.0) ) {
     die "Radius latitude out of range: $degrange[0]\n";
   }
-  if ( $degrange[1] && ($degrange[1] < -180.0 || $degrange[1] > 180.0) ) {
+  if ( defined $degrange[1] && ($degrange[1] < -180.0 || $degrange[1] > 180.0) ) {
     die "Radius longitude out of range: $degrange[1]\n";
   }
 }
@@ -988,18 +991,18 @@ sub FetchMetaData {
     $uri .= "&timewindow=${startdate},${enddate}";
   }
   if ( scalar @latrange ) {
-    $uri .= "&minlat=$latrange[0]" if ( $latrange[0] );
-    $uri .= "&maxlat=$latrange[1]" if ( $latrange[1] );
+    $uri .= "&minlat=$latrange[0]" if ( defined $latrange[0] );
+    $uri .= "&maxlat=$latrange[1]" if ( defined $latrange[1] );
   }
   if ( scalar @lonrange ) {
-    $uri .= "&minlon=$lonrange[0]" if ( $lonrange[0] );
-    $uri .= "&maxlon=$lonrange[1]" if ( $lonrange[1] );
+    $uri .= "&minlon=$lonrange[0]" if ( defined $lonrange[0] );
+    $uri .= "&maxlon=$lonrange[1]" if ( defined $lonrange[1] );
   }
   if ( scalar @degrange ) {
-    $uri .= "&lat=$degrange[0]" if ( $degrange[0] );
-    $uri .= "&lon=$degrange[1]" if ( $degrange[1] );
-    $uri .= "&maxradius=$degrange[2]" if ( $degrange[2] );
-    $uri .= "&minradius=$degrange[3]" if ( $degrange[3] );
+    $uri .= "&lat=$degrange[0]" if ( defined $degrange[0] );
+    $uri .= "&lon=$degrange[1]" if ( defined $degrange[1] );
+    $uri .= "&maxradius=$degrange[2]" if ( defined $degrange[2] );
+    $uri .= "&minradius=$degrange[3]" if ( defined $degrange[3] );
   }
 
   my $ftime = Time::HiRes::time;
