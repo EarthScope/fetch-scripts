@@ -162,6 +162,12 @@
 # 2011.279:
 #  - Fixed handling of zeros in selections for latitude, longitude and magnitude.
 #
+# 2011.336
+#  - Print error message text from service on errors.
+#  - Add undocumented -nbs option to prevent printing backspace characters in status.
+#  - Remove "query" portion from base URLs, moving them to the service calls.
+#  - Include local time in output of DONE line.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -172,21 +178,21 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.279";
+my $version = "2011.336";
 
 my $scriptname = basename($0);
 
 # Web service for metadata
-my $metadataservice = 'http://www.iris.edu/ws/station/query';
+my $metadataservice = 'http://www.iris.edu/ws/station';
 
 # Web service for bulk waveform data
-my $waveformservice = 'http://www.iris.edu/ws/bulkdataselect/query';
+my $waveformservice = 'http://www.iris.edu/ws/bulkdataselect';
 
 # Web service for SAC P&Z
-my $sacpzservice = 'http://www.iris.edu/ws/sacpz/query';
+my $sacpzservice = 'http://www.iris.edu/ws/sacpz';
 
 # Web service for RESP
-my $respservice = 'http://www.iris.edu/ws/resp/query';
+my $respservice = 'http://www.iris.edu/ws/resp';
 
 # HTTP UserAgent reported to web services
 my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
@@ -197,6 +203,7 @@ my $groupstadays = 30;
 
 my $usage      = undef;
 my $verbose    = undef;
+my $nobsprint  = undef;
 
 my $net        = undef;
 my $sta        = undef;
@@ -223,6 +230,7 @@ my $metafile   = undef;
 Getopt::Long::Configure ("bundling_override");
 my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
                               'verbose|v+'     => \$verbose,
+                              'nbs'            => \$nobsprint,
                               'net|N=s'        => \$net,
                               'sta|S=s'        => \$sta,
                               'loc|L=s'        => \$loc,
@@ -451,7 +459,8 @@ if ( $metafile ) {
   }
 }
 
-print STDERR "DONE\n";
+my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+printf STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec;
 ## End of main
 
 
@@ -699,7 +708,7 @@ sub FetchWaveformData {
   foreach my $groupref ( @grouprequest ) {
   REDOGROUP:
     # Create web service URI
-    my $uri = "${waveformservice}";
+    my $uri = "${waveformservice}/query";
 
     # Create POST data selection: specify options followed by selections
     my $postdata = "quality $qual\n";
@@ -721,18 +730,20 @@ sub FetchWaveformData {
     my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack );
 
     if ( $response->code == 404 ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+      printf (STDERR "%sNo data available\n", ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b") if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
-	  . $response->code . " :: " . status_message($response->code) . "\n";
+      printf (STDERR "%sError fetching data: "
+	      . $response->code . " :: " . status_message($response->code) . "\n",
+	      ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b");
+      print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
 
       # For real output files rewind position to the end of the last group data
       seek (OUT, $outoffset, 0) if ( $outfile ne "-" );
 
       # Retry in 10 seconds or give up if already tried 60 times.
-      if ( $redocnt < 60 ) {
+      if ( $response->code != 400 && $redocnt < 60 ) {
 	print STDERR "Retrying request in 10 seconds\n";
 	sleep 10;
 	$redocnt++;
@@ -806,7 +817,7 @@ sub FetchSACPZ {
     $rend = $mend if ( ! $rend );
 
     # Create web service URI
-    my $uri = "${sacpzservice}?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
+    my $uri = "${sacpzservice}/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
     $uri .= "&starttime=$rstart" if ( $rstart );
     $uri .= "&endtime=$rend" if ( $rend );
 
@@ -820,11 +831,13 @@ sub FetchSACPZ {
     my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
 
     if ( $response->code == 404 ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+      printf (STDERR "%sNo data available\n", ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b") if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
-	. $response->code . " :: " . status_message($response->code) . "\n";
+      printf (STDERR "%sError fetching data: "
+	      . $response->code . " :: " . status_message($response->code) . "\n",
+	      ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b");
+      print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
     }
     else {
@@ -891,7 +904,7 @@ sub FetchRESP {
     $rend = $mend if ( ! $rend );
 
     # Create web service URI
-    my $uri = "${respservice}?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
+    my $uri = "${respservice}/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
     $uri .= "&starttime=$rstart" if ( $rstart );
     $uri .= "&endtime=$rend" if ( $rend );
 
@@ -905,11 +918,13 @@ sub FetchRESP {
     my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
 
     if ( $response->code == 404 ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+      printf (STDERR "%sNo data available\n", ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b") if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
-	. $response->code . " :: " . status_message($response->code) . "\n";
+      printf (STDERR "%sError fetching data: "
+	      . $response->code . " :: " . status_message($response->code) . "\n",
+	      ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b");
+      print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
     }
     else {
@@ -946,7 +961,7 @@ sub DLCallBack {
   print OUT $data;
   $datasize += length($data);
 
-  if ( $verbose ) {
+  if ( $verbose && ! $nobsprint ) {
     printf (STDERR " %-10.10s\b\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
   }
 }
@@ -979,7 +994,7 @@ sub FetchMetaData {
   my $rendepoch = str2time ($rend);
 
   # Create web service URI
-  my $uri = "${metadataservice}?level=chan";
+  my $uri = "${metadataservice}/query?level=chan";
   $uri .= "&network=$rnet" if ( $rnet );
   $uri .= "&station=$rsta" if ( $rsta );
   $uri .= "&location=$rloc" if ( $rloc );
@@ -1018,12 +1033,14 @@ sub FetchMetaData {
   my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
 
   if ( $response->code == 404 ) {
-    print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+    printf (STDERR "%sNo data available\n", ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b") if ( $verbose );
     return;
   }
   elsif ( ! $response->is_success() ) {
-    print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
-      . $response->code . " :: " . status_message($response->code) . "\n";
+    printf (STDERR "%sError fetching data: "
+	    . $response->code . " :: " . status_message($response->code) . "\n",
+	    ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b");
+    print STDERR "------\n" . $response->decoded_content . "\n------\n";
     print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
   }
   else {
@@ -1262,7 +1279,7 @@ sub MDCallBack {
   $metadataxml .= $data;
   $datasize += length($data);
 
-  if ( $verbose ) {
+  if ( $verbose && ! $nobsprint ) {
     printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
   }
 }
