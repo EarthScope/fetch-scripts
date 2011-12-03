@@ -91,6 +91,12 @@
 #  - Remove newline and carriage return characters and trailing spaces from
 #  site and instrument strings.
 #
+# 2011.337
+#  - Print error message text from service on errors.
+#  - Add undocumented -nobs option to prevent printing backspace characters in status.
+#  - Remove "query" portion from base URLs, moving them to the service calls.
+#  - Include local time in output of DONE line.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -101,18 +107,19 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2011.172";
+my $version  = "2011.337";
 
 my $scriptname = basename($0);
 
 # Web service for metadata
-my $metadataservice = 'http://www.iris.edu/ws/station/query';
+my $metadataservice = 'http://www.iris.edu/ws/station';
 
 # HTTP UserAgent reported to web services
 my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
 
 my $usage        = undef;
 my $verbose      = undef;
+my $nobsprint    = undef;
 
 my $net          = undef;
 my $sta          = undef;
@@ -133,6 +140,7 @@ my $xmlfile      = undef;
 Getopt::Long::Configure ("bundling_override");
 my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
                               'verbose|v+'        => \$verbose,
+                              'nobs'              => \$nobsprint,
                               'net|N=s'           => \$net,
                               'sta|S=s'           => \$sta,
                               'loc|L=s'           => \$loc,
@@ -291,7 +299,8 @@ if ( $metafile ) {
   }
 }
 
-print STDERR "DONE\n";
+my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+printf STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec;
 ## End of main
 
 
@@ -488,7 +497,7 @@ sub FetchMetaData {
   my $rendepoch = str2time ($rend);
 
   # Create web service URI
-  my $uri = "${metadataservice}?level=";
+  my $uri = "${metadataservice}/query?level=";
   $uri .= ( $stalevel ) ? "sta" : "chan";
   $uri .= "&network=$rnet" if ( $rnet );
   $uri .= "&station=$rsta" if ( $rsta );
@@ -506,7 +515,7 @@ sub FetchMetaData {
 
   print STDERR "Metadata URI: '$uri'\n" if ( $verbose > 1 );
 
-  print STDERR "Fetching metadata :: Received " if ( $verbose );
+  print STDERR "Fetching metadata :: " if ( $verbose );
 
   $datasize = 0;
   $metadataxml = "";
@@ -515,16 +524,17 @@ sub FetchMetaData {
   my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
 
   if ( $response->code == 404 ) {
-    print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+    print (STDERR "No data available\n") if ( $verbose );
     return;
   }
   elsif ( ! $response->is_success() ) {
-    print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
-      . $response->code . " :: " . status_message($response->code) . "\n";
+    print (STDERR "Error fetching data: "
+	   . $response->code . " :: " . status_message($response->code) . "\n");
+    print STDERR "------\n" . $response->decoded_content . "\n------\n";
     print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
   }
   else {
-    print STDERR "\n" if ( $verbose );
+    printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
   }
 
   my $duration = Time::HiRes::time - $ftime;
@@ -853,7 +863,7 @@ sub MDCallBack {
   $metadataxml .= $data;
   $datasize += length($data);
 
-  if ( $verbose ) {
+  if ( $verbose && ! $nobsprint ) {
     printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
   }
 }

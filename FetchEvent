@@ -62,6 +62,12 @@
 # 2011.277:
 #  - Remove debugging code.
 #
+# 2011.337:
+#  - Print error message text from service on errors.
+#  - Add undocumented -nobs option to prevent printing backspace characters in status.
+#  - Remove "query" portion from base URLs, moving them to the service calls.
+#  - Include local time in output of DONE line.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -72,18 +78,19 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.273";
+my $version = "2011.337";
 
 my $scriptname = basename($0);
 
 # Web service for metadata
-my $eventservice = 'http://www.iris.edu/ws/event/query';
+my $eventservice = 'http://www.iris.edu/ws/event';
 
 # HTTP UserAgent reported to web services
 my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
 
 my $usage        = undef;
 my $verbose      = undef;
+my $nobsprint    = undef;
 
 my $starttime    = undef;
 my $endtime      = undef;
@@ -114,7 +121,7 @@ my $eventxml     = undef;
 Getopt::Long::Configure ("bundling_override");
 my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
                               'verbose|v+'        => \$verbose,
-
+                              'nobs'              => \$nobsprint,
 			      'starttime|s=s'     => \$starttime,
 			      'endtime|e=s'       => \$endtime,
 			      'lat=s'             => \@latrange,
@@ -377,7 +384,8 @@ if ( $verbose && scalar @eventids > 0 ) {
     $totalevents, $totalorigins, $totalmags;
 }
 
-print STDERR "DONE\n";
+my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+printf STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec;
 ## End of main
 
 
@@ -412,7 +420,7 @@ sub FetchEvents {
   my $ua = RequestAgent->new();
 
   # Create web service URI
-  my $uri = "${eventservice}?";
+  my $uri = "${eventservice}/query?";
   $uri .= "orderby="; $uri .= ($orderbymag) ? "magnitude" : "time";
   $uri .= "&starttime=$starttime" if ( $starttime );
   $uri .= "&endtime=$endtime" if ( $endtime );
@@ -451,7 +459,7 @@ sub FetchEvents {
 
   print STDERR "Event URI: '$uri'\n" if ( $verbose > 1 );
 
-  print STDERR "Fetching event information :: Received " if ( $verbose );
+  print STDERR "Fetching event information :: " if ( $verbose );
 
   $datasize = 0;
   $eventxml = "";
@@ -460,16 +468,17 @@ sub FetchEvents {
   my $response = $ua->get($uri, ':content_cb' => \&EDCallBack );
 
   if ( $response->code == 404 ) {
-    print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+    print (STDERR "No data available\n") if ( $verbose );
     return;
   }
   elsif ( ! $response->is_success() ) {
-    print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
-      . $response->code . " :: " . status_message($response->code) . "\n";
+    print (STDERR "Error fetching data: "
+	   . $response->code . " :: " . status_message($response->code) . "\n");
+    print STDERR "------\n" . $response->decoded_content . "\n------\n";
     print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
   }
   else {
-    print STDERR "\n" if ( $verbose );
+    printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
   }
 
   my $duration = Time::HiRes::time - $ftime;
@@ -645,7 +654,7 @@ sub FetchEvents {
 
 	@{$origins{$eventid}{$originid}} = ($time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid);
         $totalorigins++;
-	
+
 	($originid,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = (undef) x 9;
 	$inorigin = 0;
       }
@@ -718,7 +727,7 @@ sub EDCallBack {
   $eventxml .= $data;
   $datasize += length($data);
 
-  if ( $verbose ) {
+  if ( $verbose && ! $nobsprint ) {
     printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
   }
 }

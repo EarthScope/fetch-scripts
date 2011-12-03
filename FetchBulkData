@@ -162,9 +162,9 @@
 # 2011.279:
 #  - Fixed handling of zeros in selections for latitude, longitude and magnitude.
 #
-# 2011.336
+# 2011.337
 #  - Print error message text from service on errors.
-#  - Add undocumented -nbs option to prevent printing backspace characters in status.
+#  - Add undocumented -nobs option to prevent printing backspace characters in status.
 #  - Remove "query" portion from base URLs, moving them to the service calls.
 #  - Include local time in output of DONE line.
 #
@@ -178,7 +178,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.336";
+my $version = "2011.337";
 
 my $scriptname = basename($0);
 
@@ -230,7 +230,7 @@ my $metafile   = undef;
 Getopt::Long::Configure ("bundling_override");
 my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
                               'verbose|v+'     => \$verbose,
-                              'nbs'            => \$nobsprint,
+                              'nobs'           => \$nobsprint,
                               'net|N=s'        => \$net,
                               'sta|S=s'        => \$sta,
                               'loc|L=s'        => \$loc,
@@ -722,7 +722,7 @@ sub FetchWaveformData {
     print STDERR "Waveform URI: '$uri'\n" if ( $verbose > 1 );
     print STDERR "Data selection (POST):\n$postdata" if ( $verbose > 1 );
 
-    print STDERR "Downloading waveform data (group $groupnum of $groupcnt) :: Received " if ( $verbose );
+    print STDERR "Downloading waveform data (group $groupnum of $groupcnt) :: " if ( $verbose );
 
     $datasize = 0;
 
@@ -730,12 +730,11 @@ sub FetchWaveformData {
     my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack );
 
     if ( $response->code == 404 ) {
-      printf (STDERR "%sNo data available\n", ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b") if ( $verbose );
+      print (STDERR "No data available\n") if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
-      printf (STDERR "%sError fetching data: "
-	      . $response->code . " :: " . status_message($response->code) . "\n",
-	      ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b");
+      print (STDERR "Error fetching data: "
+	     . $response->code . " :: " . status_message($response->code) . "\n");
       print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
 
@@ -755,7 +754,7 @@ sub FetchWaveformData {
       }
     }
     else {
-      print STDERR "\n" if ( $verbose );
+      printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
     }
 
     # Get ready for next group
@@ -823,7 +822,7 @@ sub FetchSACPZ {
 
     print STDERR "SAC-PZ URI: '$uri'\n" if ( $verbose > 1 );
 
-    print STDERR "Downloading $sacpzfile ($count/$total) :: Received " if ( $verbose );
+    print STDERR "Downloading $sacpzfile ($count/$total) :: " if ( $verbose );
 
     $datasize = 0;
 
@@ -831,17 +830,16 @@ sub FetchSACPZ {
     my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
 
     if ( $response->code == 404 ) {
-      printf (STDERR "%sNo data available\n", ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b") if ( $verbose );
+      print (STDERR "No data available\n") if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
-      printf (STDERR "%sError fetching data: "
-	      . $response->code . " :: " . status_message($response->code) . "\n",
-	      ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b");
+      print (STDERR "Error fetching data: "
+	     . $response->code . " :: " . status_message($response->code) . "\n");
       print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
     }
     else {
-      print STDERR "\n" if ( $verbose );
+      printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
     }
 
     # Add data bytes to global total
@@ -910,7 +908,7 @@ sub FetchRESP {
 
     print STDERR "RESP URI: '$uri'\n" if ( $verbose > 1 );
 
-    print STDERR "Downloading $respfile ($count/$total) :: Received " if ( $verbose );
+    print STDERR "Downloading $respfile ($count/$total) :: " if ( $verbose );
 
     $datasize = 0;
 
@@ -918,17 +916,16 @@ sub FetchRESP {
     my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
 
     if ( $response->code == 404 ) {
-      printf (STDERR "%sNo data available\n", ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b") if ( $verbose );
+      print (STDERR "No data available\n") if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
-      printf (STDERR "%sError fetching data: "
-	      . $response->code . " :: " . status_message($response->code) . "\n",
-	      ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b");
+      print (STDERR "Error fetching data: "
+	     . $response->code . " :: " . status_message($response->code) . "\n");
       print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
     }
     else {
-      print STDERR "\n" if ( $verbose );
+      printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
     }
 
     # Add data bytes to global total
@@ -962,7 +959,7 @@ sub DLCallBack {
   $datasize += length($data);
 
   if ( $verbose && ! $nobsprint ) {
-    printf (STDERR " %-10.10s\b\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
+    printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
   }
 }
 
@@ -1024,7 +1021,7 @@ sub FetchMetaData {
 
   print STDERR "Metadata URI: '$uri'\n" if ( $verbose > 1 );
 
-  print STDERR "Fetching metadata :: Received " if ( $verbose );
+  print STDERR "Fetching metadata :: " if ( $verbose );
 
   $datasize = 0;
   $metadataxml = "";
@@ -1033,18 +1030,17 @@ sub FetchMetaData {
   my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
 
   if ( $response->code == 404 ) {
-    printf (STDERR "%sNo data available\n", ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b") if ( $verbose );
+    print (STDERR "No data available\n") if ( $verbose );
     return;
   }
   elsif ( ! $response->is_success() ) {
-    printf (STDERR "%sError fetching data: "
-	    . $response->code . " :: " . status_message($response->code) . "\n",
-	    ($nobsprint)?"":"\b\b\b\b\b\b\b\b\b");
+    print (STDERR "Error fetching data: "
+	   . $response->code . " :: " . status_message($response->code) . "\n");
     print STDERR "------\n" . $response->decoded_content . "\n------\n";
     print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
   }
   else {
-    print STDERR "\n" if ( $verbose );
+    printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
   }
 
   my $duration = Time::HiRes::time - $ftime;
