@@ -162,11 +162,15 @@
 # 2011.279:
 #  - Fixed handling of zeros in selections for latitude, longitude and magnitude.
 #
-# 2011.337
+# 2011.337:
 #  - Print error message text from service on errors.
 #  - Add undocumented -nobs option to prevent printing backspace characters in status.
 #  - Remove "query" portion from base URLs, moving them to the service calls.
 #  - Include local time in output of DONE line.
+#
+# 2012.045:
+#  - Print "No data available" when return code is 204 in addition to 404.
+#  - Support for start/end times specified up to microsecond resolution.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -178,7 +182,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.337";
+my $version = "2011.045";
 
 my $scriptname = basename($0);
 
@@ -274,8 +278,8 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -L,--loc          Location ID, list and wildcards (* and ?) accepted\n";
   print " -C,--chan         Channel codes, list and wildcards (* and ?) accepted\n";
   print " -Q,--qual         Quality indicator, default is best\n";
-  print " -s starttime      Specify start time (YYYY-MM-DD,HH:MM:SS)\n";
-  print " -e endtime        Specify end time (YYYY-MM-DD,HH:MM:SS)\n";
+  print " -s starttime      Specify start time (YYYY-MM-DD,HH:MM:SS.ssssss)\n";
+  print " -e endtime        Specify end time (YYYY-MM-DD,HH:MM:SS.ssssss)\n";
   print " --lat min:max     Specify a minimum and/or maximum latitude range\n";
   print " --lon min:max     Specify a minimum and/or maximum longitude range\n";
   print " --radius lat:lon:maxradius[:minradius]\n";
@@ -317,13 +321,15 @@ if ( $outfile && ( ! defined $selectfile && ! defined $bfastfile &&
 
 # Normalize time strings given on the command line
 if ( $starttime ) {
-  my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $starttime);
+  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $starttime);
   $starttime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+  $starttime .= ".$subsec" if ( $subsec );
 }
 
 if ( $endtime ) {
-  my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $endtime);
+  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $endtime);
   $endtime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+  $endtime .= ".$subsec" if ( $subsec );
 }
 
 # Validate and prepare lat, lon and radius input
@@ -491,13 +497,15 @@ sub ReadSelectFile {
 
     # Normalize time strings
     if ( $start ) {
-      my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $start);
+      my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $start);
       $start = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+      $start .= ".$subsec" if ( $subsec );
     }
 
     if ( $end ) {
-      my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $end);
+      my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $end);
       $end = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+      $end .= ".$subsec" if ( $subsec );
     }
 
     # Add selection to global list
@@ -564,7 +572,7 @@ sub ReadBFastFile {
       print "Unrecognized start min: '$smin', skipping line $linecount\n" if ( $verbose );
       next;
     }
-    if ( $ssec !~ /^\d{1,2}\.?\d{0,4}?$/ ) {
+    if ( $ssec !~ /^\d{1,2}\.?\d{0,6}?$/ ) {
       print "Unrecognized start seconds: '$ssec', skipping line $linecount\n" if ( $verbose );
       next;
     }
@@ -588,7 +596,7 @@ sub ReadBFastFile {
       print "Unrecognized end min: '$emin', skipping line $linecount\n" if ( $verbose );
       next;
     }
-    if ( $esec !~ /^\d{1,2}\.?\d?$/ ) {
+    if ( $esec !~ /^\d{1,2}\.?\d{0,6}?$/ ) {
       print "Unrecognized end seconds: '$esec', skipping line $linecount\n" if ( $verbose );
       next;
     }
@@ -605,7 +613,7 @@ sub ReadBFastFile {
     my $loc = undef;
     $loc = pop @chans if ( scalar @chans == ($count+1) );
 
-    if ( $loc && $loc !~ /^[A-Za-z0-9*?]{1,2}$/ ) {
+    if ( $loc && $loc !~ /^[A-Za-z0-9*?\-]{1,2}$/ ) {
       print "Unrecognized location ID: '$loc', skipping line $linecount\n" if ( $verbose );
       next;
     }
@@ -624,8 +632,12 @@ sub ReadBFastFile {
     }
 
     # Normalize time strings
+    my ($ssec,$ssub) = split (/\./, $ssec);
+    my ($esec,$esub) = split (/\./, $esec);
     my $start = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $syear, $smon, $sday, $shour, $smin, $ssec);
+    $start .= ".$ssub" if ( $ssub );
     my $end = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $eyear, $emon, $eday, $ehour, $emin, $esec);
+    $end .= ".$esub" if ( $esub );
 
     # Add selection to global list for each channel
     foreach my $chan ( @chans ) {
@@ -729,7 +741,7 @@ sub FetchWaveformData {
     # Fetch waveform data from web service using callback routine
     my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack );
 
-    if ( $response->code == 404 ) {
+    if ( $response->code == 404 || $response->code == 204 ) {
       print (STDERR "No data available\n") if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
@@ -829,7 +841,7 @@ sub FetchSACPZ {
     # Fetch data from web service using callback routine
     my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
 
-    if ( $response->code == 404 ) {
+    if ( $response->code == 404 || $response->code == 204 ) {
       print (STDERR "No data available\n") if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
@@ -915,7 +927,7 @@ sub FetchRESP {
     # Fetch data from web service using callback routine
     my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
 
-    if ( $response->code == 404 ) {
+    if ( $response->code == 404 || $response->code == 204 ) {
       print (STDERR "No data available\n") if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
@@ -1029,7 +1041,7 @@ sub FetchMetaData {
   # Fetch metadata from web service using callback routine
   my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
 
-  if ( $response->code == 404 ) {
+  if ( $response->code == 404 || $response->code == 204 ) {
     print (STDERR "No data available\n") if ( $verbose );
     return;
   }

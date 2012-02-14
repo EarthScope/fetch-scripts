@@ -68,6 +68,10 @@
 #  - Remove "query" portion from base URLs, moving them to the service calls.
 #  - Include local time in output of DONE line.
 #
+# 2012.045:
+#  - Print "No data available" when return code is 204 in addition to 404.
+#  - Support for start/end times specified up to microsecond resolution.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -78,7 +82,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.337";
+my $version = "2012.045";
 
 my $scriptname = basename($0);
 
@@ -160,8 +164,8 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " Options:\n";
   print " -v                More verbosity, may be specified multiple times (-vv, -vvv)\n";
   print "\n";
-  print " -s starttime      Limit to origins after time (YYYY-MM-DD,HH:MM:SS)\n";
-  print " -e endtime        Limit to origins before time (YYYY-MM-DD,HH:MM:SS)\n";
+  print " -s starttime      Limit to origins after time (YYYY-MM-DD,HH:MM:SS.sss)\n";
+  print " -e endtime        Limit to origins before time (YYYY-MM-DD,HH:MM:SS.sss)\n";
   print " --lat min:max     Specify a minimum and/or maximum latitude range\n";
   print " --lon min:max     Specify a minimum and/or maximum longitude range\n";
   print " --radius lat:lon:maxradius[:minradius]\n";
@@ -197,13 +201,15 @@ if ( $verbose ) {
 
 # Normalize time strings
 if ( $starttime ) {
-  my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $starttime);
+  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $starttime);
   $starttime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+  $starttime .= ".$subsec" if ( $subsec );
 }
 
 if ( $endtime ) {
-  my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $endtime);
+  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $endtime);
   $endtime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+  $endtime .= ".$subsec" if ( $subsec );
 }
 
 if ( $updatedafter ) {
@@ -467,7 +473,7 @@ sub FetchEvents {
   # Fetch event information from web service using callback routine
   my $response = $ua->get($uri, ':content_cb' => \&EDCallBack );
 
-  if ( $response->code == 404 ) {
+  if ( $response->code == 404 || $response->code == 204 ) {
     print (STDERR "No data available\n") if ( $verbose );
     return;
   }
