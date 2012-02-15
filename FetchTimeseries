@@ -85,10 +85,15 @@
 #  - Remove newline and carriage return characters from instrument values.
 #
 # 2011.337
-#  x- Print error message text from service on errors.
-#  x- Add undocumented -nobs option to prevent printing backspace characters in status.
+#  - Print error message text from service on errors.
+#  - Add undocumented -nobs option to prevent printing backspace characters in status.
 #  - Remove "query" portion from base URLs, moving them to the service calls.
 #  - Include local time in output of DONE line.
+#
+# 2012.045:
+#  - Print "No data available" when return code is 204 in addition to 404.
+#  - Support for start/end times specified up to microsecond resolution.
+#  - Allow -- location IDs in BREQ_FAST formatted selections.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -100,7 +105,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2011.337";
+my $version = "2012.045";
 
 my $scriptname = basename($0);
 
@@ -194,13 +199,15 @@ if ( $outfile && ( ! defined $selectfile && ! defined $bfastfile &&
 
 # Normalize time strings
 if ( $starttime ) {
-  my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $starttime);
+  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $starttime);
   $starttime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+  $starttime .= ".$subsec" if ( $subsec );
 }
 
 if ( $endtime ) {
-  my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $endtime);
+  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $endtime);
   $endtime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+  $endtime .= ".$subsec" if ( $subsec );
 }
 
 # An array to hold data selections
@@ -319,13 +326,15 @@ sub ReadSelectFile {
 
     # Normalize time strings
     if ( $start ) {
-      my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $start);
+      my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $start);
       $start = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+      $start .= ".$subsec" if ( $subsec );
     }
 
     if ( $end ) {
-      my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $end);
+      my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $end);
       $end = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+      $end .= ".$subsec" if ( $subsec );
     }
 
     # Add selection to global list
@@ -392,7 +401,7 @@ sub ReadBFastFile {
       print "Unrecognized start min: '$smin', skipping line $linecount\n" if ( $verbose );
       next;
     }
-    if ( $ssec !~ /^\d{1,2}\.?\d{0,4}?$/ ) {
+    if ( $ssec !~ /^\d{1,2}\.?\d{0,6}?$/ ) {
       print "Unrecognized start seconds: '$ssec', skipping line $linecount\n" if ( $verbose );
       next;
     }
@@ -416,7 +425,7 @@ sub ReadBFastFile {
       print "Unrecognized end min: '$emin', skipping line $linecount\n" if ( $verbose );
       next;
     }
-    if ( $esec !~ /^\d{1,2}\.?\d?$/ ) {
+    if ( $esec !~ /^\d{1,2}\.?\d{0,6}?$/ ) {
       print "Unrecognized end seconds: '$esec', skipping line $linecount\n" if ( $verbose );
       next;
     }
@@ -433,7 +442,7 @@ sub ReadBFastFile {
     my $loc = undef;
     $loc = pop @chans if ( scalar @chans == ($count+1) );
 
-    if ( $loc && $loc !~ /^[A-Za-z0-9*?]{1,2}$/ ) {
+    if ( $loc && $loc !~ /^[A-Za-z0-9*?\-]{1,2}$/ ) {
       print "Unrecognized location ID: '$loc', skipping line $linecount\n" if ( $verbose );
       next;
     }
@@ -452,8 +461,12 @@ sub ReadBFastFile {
     }
 
     # Normalize time strings
+    my ($ssec,$ssub) = split (/\./, $ssec);
     my $start = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $syear, $smon, $sday, $shour, $smin, $ssec);
+    $start .= ".$ssub" if ( $ssub );
+    my ($esec,$esub) = split (/\./, $esec);
     my $end = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $eyear, $emon, $eday, $ehour, $emin, $esec);
+    $end .= ".$esub" if ( $esub );
 
     # Add selection to global list for each channel
     foreach my $chan ( @chans ) {
@@ -505,7 +518,7 @@ sub FetchTimeseries {
     # Fetch data from web service using callback routine
     my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
 
-    if ( $response->code == 404 ) {
+    if ( $response->code == 404 || $response->code == 204 ) {
       print (STDERR "No data available\n") if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
@@ -608,7 +621,7 @@ sub FetchMetaData {
   # Fetch metadata from web service using callback routine
   my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
 
-  if ( $response->code == 404 ) {
+  if ( $response->code == 404 || $response->code == 204 ) {
     print (STDERR "No data available\n") if ( $verbose );
     return;
   }
