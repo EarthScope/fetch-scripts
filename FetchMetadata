@@ -102,6 +102,13 @@
 #  - Allow start/end times specified with microsecond resolution, subseconds are currently ignored.
 #  - Allow -- location IDs in BREQ_FAST formatted selections.
 #
+# 2012.061
+#  - Add -resp option to request response level information, no extra parsing
+#  or printing of response level details is included, useful for saving the XML.
+#  - Add index numbers to XML output file if more than one request is submitted
+#  to the server.  Using a selection list or BREQ_FAST file for input can generate
+#  multiple requests, one request per line in fact.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -112,7 +119,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2012.045";
+my $version  = "2012.061";
 
 my $scriptname = basename($0);
 
@@ -136,6 +143,7 @@ my $updatedafter = undef;
 my $selectfile   = undef;
 my $bfastfile    = undef;
 my $stalevel     = undef;
+my $resplevel    = undef;
 my $appname      = undef;
 my $auth         = undef;
 my $outfile      = undef;
@@ -156,6 +164,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
 			      'selectfile|l=s'    => \$selectfile,
 			      'bfastfile|b=s'     => \$bfastfile,
 			      'stalevel|sta'      => \$stalevel,
+			      'resplevel|resp'    => \$resplevel,
 			      'appname|A=s'       => \$appname,
 			      'auth|a=s'          => \$auth,
 			      'outfile|o=s'       => \$outfile,
@@ -185,6 +194,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
   print " -sta              Print station level information, default is channel\n";
+  print " -resp             Request response level information, no details printed\n";
   print " -A appname        Application/version string for identification\n";
 #  print " -a user:pass      User and password when authentication is needed\n";
   print "\n";
@@ -252,9 +262,11 @@ my $metadataxml;
 my $datasize;
 
 # Fetch metadata from the station web service
+my $selectidx = 0;
 foreach my $selection ( @selections ) {
   my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
   &FetchMetaData($snet,$ssta,$sloc,$schan,$sstart,$send);
+  $selectidx++;
 }
 
 # Write to either specified output file or stdout
@@ -509,9 +521,12 @@ sub FetchMetaData {
   my $rstartepoch = str2time ($rstart);
   my $rendepoch = str2time ($rend);
 
+  my $level = "chan";
+  $level = "sta" if ( $stalevel );
+  $level = "resp" if ( $resplevel );
+
   # Create web service URI
-  my $uri = "${metadataservice}/query?level=";
-  $uri .= ( $stalevel ) ? "sta" : "chan";
+  my $uri = "${metadataservice}/query?level=$level";
   $uri .= "&network=$rnet" if ( $rnet );
   $uri .= "&station=$rsta" if ( $rsta );
   $uri .= "&location=$rloc" if ( $rloc );
@@ -575,7 +590,8 @@ sub FetchMetaData {
   print STDERR "Parsing XML metadata... " if ( $verbose );
 
   # Open file to store metadata XML
-  my $metadataxmlfile = ( $xmlfile ) ? $xmlfile : "metadata-$$.xml";
+  my $xmlfileidx = ( $selectidx ) ? "$xmlfile.$selectidx" : $xmlfile; # Make separate files for each request
+  my $metadataxmlfile = ( $xmlfile ) ? $xmlfileidx : "metadata-$$.xml";
   if ( open (MXML, ">$metadataxmlfile") ) {
     # Write XML and close file
     print MXML $metadataxml;
