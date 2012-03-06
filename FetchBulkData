@@ -173,6 +173,11 @@
 #  - Support for start/end times specified up to microsecond resolution.
 #  - Allow -- location IDs in BREQ_FAST formatted selections.
 #
+# 2012.066:
+# - Use the "queryauth" method with the service when authentication
+# credentials are specified.
+# - Handle 401 (unauthorized) HTTP return status cleanly.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -183,7 +188,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2012.045";
+my $version = "2012.066";
 
 my $scriptname = basename($0);
 
@@ -290,7 +295,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -msl length       Limit returned data to a minimum segment length\n";
   print " -lso              Limit returned data to the longest segment only\n";
   print " -A appname        Application/version string for identification\n";
-#  print " -a user:pass      User and password when authentication is needed\n";
+  print " -a user:pass      User and password for access to restricted data\n";
   print "\n";
   print " -o outfile        Fetch waveform data and write to output file\n";
   print " -sd sacpzdir      Fetch SAC P&Zs and write files to sacpzdir\n";
@@ -721,7 +726,8 @@ sub FetchWaveformData {
   foreach my $groupref ( @grouprequest ) {
   REDOGROUP:
     # Create web service URI
-    my $uri = "${waveformservice}/query";
+    my $query = ( $auth ) ? "queryauth" : "query";
+    my $uri = "${waveformservice}/$query";
 
     # Create POST data selection: specify options followed by selections
     my $postdata = "quality $qual\n";
@@ -744,6 +750,10 @@ sub FetchWaveformData {
 
     if ( $response->code == 404 || $response->code == 204 ) {
       print (STDERR "No data available\n") if ( $verbose );
+    }
+    if ( $response->code == 401 ) {
+      print (STDERR "Authorization failed, username and password not recognized\n");
+      last;
     }
     elsif ( ! $response->is_success() ) {
       print (STDERR "Error fetching data: "
