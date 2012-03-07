@@ -27,10 +27,10 @@
 #
 # 1) Command line arguments: -N, -S, -L, -C, -Q, -s, -e
 #
-# 2) A selection file containing a list of:
-#    Net Sta Loc Chan Start End
+# 2) A BREQ_FAST formatted file, http://www.iris.edu/manuals/breq_fast.htm
 #
-# 3) A BREQ_FAST formatted file, http://www.iris.edu/manuals/breq_fast.htm
+# 3) A selection file containing a list of:
+#    Net Sta Loc Chan Start End
 #
 # Example selection file contents:
 # II BFO 00 BHZ 2011-01-01T00:00:00 2011-01-01T01:00:00
