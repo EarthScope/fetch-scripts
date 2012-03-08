@@ -174,9 +174,13 @@
 #  - Allow -- location IDs in BREQ_FAST formatted selections.
 #
 # 2012.066:
-# - Use the "queryauth" method with the service when authentication
-# credentials are specified.
-# - Handle 401 (unauthorized) HTTP return status cleanly.
+#  - Use the "queryauth" method with the service when authentication
+#  credentials are specified.
+#  - Handle 401 (unauthorized) HTTP return status cleanly.
+#
+# 2012.068:
+#  - Use new starttime and endtime parameters for ws-station instead of
+#  deprecated timewindow.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -188,7 +192,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2012.066";
+my $version = "2012.068";
 
 my $scriptname = basename($0);
 
@@ -1009,22 +1013,14 @@ sub FetchMetaData {
   # Create HTTP user agent
   my $ua = RequestAgent->new();
 
-  # Convert request start/end times to epoch times
-  my $rstartepoch = str2time ($rstart);
-  my $rendepoch = str2time ($rend);
-
   # Create web service URI
   my $uri = "${metadataservice}/query?level=chan";
   $uri .= "&network=$rnet" if ( $rnet );
   $uri .= "&station=$rsta" if ( $rsta );
   $uri .= "&location=$rloc" if ( $rloc );
   $uri .= "&channel=$rchan" if ( $rchan );
-  if ( $rstart && $rend ) {
-    my ($startdate) = $rstart =~ /^(\d{4,4}-\d{1,2}-\d{1,2}).*$/;
-    my ($enddate) = $rend =~ /^(\d{4,4}-\d{1,2}-\d{1,2}).*$/;
-
-    $uri .= "&timewindow=${startdate},${enddate}";
-  }
+  $uri .= "&starttime=$rstart" if ( $rstart );
+  $uri .= "&endtime=$rend" if ( $rend );
   if ( scalar @latrange ) {
     $uri .= "&minlat=$latrange[0]" if ( defined $latrange[0] );
     $uri .= "&maxlat=$latrange[1]" if ( defined $latrange[1] );
