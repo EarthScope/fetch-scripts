@@ -174,7 +174,7 @@
 #  - Allow -- location IDs in BREQ_FAST formatted selections.
 #
 # 2012.066:
-#  - Use the "queryauth" method with the service when authentication
+#  - Use the "queryauth" method with the waveform service when authentication
 #  credentials are specified.
 #  - Handle 401 (unauthorized) HTTP return status cleanly.
 #
