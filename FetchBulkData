@@ -755,7 +755,7 @@ sub FetchWaveformData {
     if ( $response->code == 404 || $response->code == 204 ) {
       print (STDERR "No data available\n") if ( $verbose );
     }
-    if ( $response->code == 401 ) {
+    elsif ( $response->code == 401 ) {
       print (STDERR "Authorization failed, username and password not recognized\n");
       last;
     }
