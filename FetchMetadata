@@ -117,6 +117,10 @@
 #  - Parse site name in a new location of StationXML, site is now placed in the
 #  Site->Name element, was previously in the Site->Country element.
 #
+# 2012.102:
+#  - Correctly parse epoch times from channel epoch by skipping the new channel
+#  comment dates, this corrects the operating times in the metadata files.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -127,7 +131,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2012.100";
+my $version  = "2012.102";
 
 my $scriptname = basename($0);
 
@@ -630,6 +634,7 @@ sub FetchMetaData {
   use HTTP::Date;
 
   my $inepoch = 0;
+  my $incomments = 0;
   my $instart = 0;
   my $inend = 0;
   my $inlat = 0;
@@ -668,7 +673,8 @@ sub FetchMetaData {
     }
 
     if ( $inepoch ) {
-      if ( $element->{Name} eq "StartDate" ) { $instart = 1; }
+      if ( $element->{Name} =~ /Comments/ ) { $incomments = 1; }
+      elsif ( $element->{Name} eq "StartDate" ) { $instart = 1; }
       elsif ( $element->{Name} eq "EndDate" ) { $inend = 1; }
       elsif ( $element->{Name} eq "Lat" ) { $inlat = 1; }
       elsif ( $element->{Name} eq "Lon" ) { $inlon = 1; }
@@ -731,7 +737,8 @@ sub FetchMetaData {
     }
 
     if ( $inepoch ) {
-      if ( $element->{Name} eq "StartDate" ) { $instart = 0; }
+      if ( $element->{Name} =~ /Comments/ ) { $incomments = 0; }
+      elsif ( $element->{Name} eq "StartDate" ) { $instart = 0; }
       elsif ( $element->{Name} eq "EndDate" ) { $inend = 0; }
       elsif ( $element->{Name} eq "Lat" ) { $inlat = 0; }
       elsif ( $element->{Name} eq "Lon" ) { $inlon = 0; }
@@ -757,8 +764,8 @@ sub FetchMetaData {
     my ($self,$element) = @_;
 
     if ( $element->{Data} ) {
-      if ( $instart ) { $start .= $element->{Data}; }
-      elsif ( $inend ) { $end .= $element->{Data}; }
+      if ( $instart && ! $incomments ) { $start .= $element->{Data}; }
+      elsif ( $inend && ! $incomments ) { $end .= $element->{Data}; }
       elsif ( $inlat ) { $lat .= $element->{Data}; }
       elsif ( $inlon ) { $lon .= $element->{Data}; }
       elsif ( $inelevation ) { $elev .= $element->{Data}; }
