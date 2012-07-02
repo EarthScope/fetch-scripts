@@ -97,7 +97,7 @@
 #
 # 2012.068:
 #  - Use new starttime and endtime parameters for ws-station instead of
-#  deprected timewindow.  These options can now be specified independently.
+#  deprecated timewindow.  These options can now be specified independently.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 

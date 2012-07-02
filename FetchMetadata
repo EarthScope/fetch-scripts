@@ -111,7 +111,7 @@
 #
 # 2012.068:
 #  - Use new starttime and endtime parameters for ws-station instead of
-#  deprected timewindow.  These options can now be specified independently.
+#  deprecated timewindow.  These options can now be specified independently.
 #
 # 2012.100:
 #  - Parse site name in a new location of StationXML, site is now placed in the
