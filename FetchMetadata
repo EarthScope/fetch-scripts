@@ -44,12 +44,10 @@
 #
 # A line will be written to the file for each channel epoch and will
 # contain:
-# "net,sta,loc,chan,lat,lon,elev,depth,azimuth,SACdip,instrument,scale,scalefreq,scaleunits,samplerate,start,end"
+# "net|sta|loc|chan|lat|lon|elev|depth|azimuth|dip|instrument|scale|scalefreq|scaleunits|samplerate|start|end"
 #
-# The dip field in this output will be converted from the SEED to SAC
-# convention by adding 90.  This metadata file can be used directly
-# with mseed2sac or tracedsp to create SAC files including basic
-# metadata.
+# This metadata file can be used directly with mseed2sac or tracedsp
+# to create SAC files including basic metadata.
 #
 #
 # ## Change history ##
@@ -121,6 +119,11 @@
 #  - Correctly parse epoch times from channel epoch by skipping the new channel
 #  comment dates, this corrects the operating times in the metadata files.
 #
+# 2012.234:
+#  - Remove sorting, print data in order returned by the service.
+#  - Use vertical bars as field separators instead of commas, do not translate commas.
+#  - Do not convert dip to SAC convention, leave it in SEED convention.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -131,7 +134,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2012.102";
+my $version  = "2012.234";
 
 my $scriptname = basename($0);
 
@@ -295,19 +298,16 @@ if ( $metafile ) {
     open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
 
     # Print header line
-    print META "#net,sta,loc,chan,lat,lon,elev,depth,azimuth,SACdip,instrument,scale,scalefreq,scaleunits,samplerate,start,end\n";
+    print META "#net|sta|loc|chan|lat|lon|elev|depth|azimuth|dip|instrument|scale|scalefreq|scaleunits|samplerate|start|end\n";
 
-    foreach my $channel ( sort @metadata ) {
+    foreach my $channel ( @metadata ) {
       my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) =
 	split (/,/, $channel);
-
-      # Convert inclination/dip to SAC convention
-      $dip += 90;
 
       $sensfreq = sprintf ("%0g", $sensfreq);
       $samplerate = sprintf ("%0g", $samplerate);
 
-      print META "$net,$sta,$loc,$chan,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$sens,$sensfreq,$sensunit,$samplerate,$start,$end\n";
+      print META "$net|$sta|$loc|$chan|$lat|$lon|$elev|$depth|$azimuth|$dip|$instrument|$sens|$sensfreq|$sensunit|$samplerate|$start|$end\n";
     }
 
     close META;
@@ -318,12 +318,12 @@ if ( $metafile ) {
     open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
 
     # Print header line
-    print META "#net,sta,lat,lon,elev,site,start,end\n";
+    print META "#net|sta|lat|lon|elev|site|start|end\n";
 
-    foreach my $station ( sort @metadata ) {
+    foreach my $station ( @metadata ) {
       my ($net,$sta,$start,$end,$lat,$lon,$elev,$site) = split (/,/, $station);
 
-      print META "$net,$sta,$lat,$lon,$elev,$site,$start,$end\n";
+      print META "$net|$sta|$lat|$lon|$elev|$site|$start|$end\n";
     }
 
     close META;
@@ -714,9 +714,6 @@ sub FetchMetaData {
       # Translate metadata location ID to "--" if it's spaces
       my $dloc = ( $loc eq "  " ) ? "--" : $loc;
 
-      # Translate commas in metadata instrument name to semi-colons
-      $instrument =~ s/,/;/g;
-
       # Remove newlines, returns & trailing spaces in metadata instrument name
       $instrument =~ s/[\n\r]//g;
       $instrument =~ s/\s*$//g;
@@ -836,9 +833,6 @@ sub FetchMetaData {
     elsif ( $element->{Name} eq "StationEpoch" ) {
       # Track epoch count
       $totalepochs++;
-
-      # Translate commas in site name to semi-colons
-      $site =~ s/,/;/g;
 
       # Remove newlines, returns and trailing spaces in site name
       $site =~ s/[\n\r]//g;
