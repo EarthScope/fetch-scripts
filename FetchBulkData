@@ -186,6 +186,9 @@
 #  - Correctly parse epoch times from channel epoch by skipping the new channel
 #  comment dates, this corrects the operating times in the metadata files.
 #
+# 2012.312:
+#  - Fix the RESP file output names to have the correct location ID.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -196,7 +199,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2012.102";
+my $version = "2012.312";
 
 my $scriptname = basename($0);
 
@@ -919,7 +922,7 @@ sub FetchRESP {
     $count++;
 
     # Translate metadata location ID from "--" to blank
-    my $ploc = ( $loc eq "--" ) ? "" : $loc;
+    my $ploc = ( $rloc eq "--" ) ? "" : $rloc;
 
     # Generate output file name and open
     my $respfile = "$respdir/RESP.$rnet.$rsta.$ploc.$rchan";
