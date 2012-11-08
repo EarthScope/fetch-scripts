@@ -36,7 +36,7 @@
 #   MAGNITUDE <magtype>,<magvalue>,<author> magnitudeid=<magnitudeID>
 #   MAGNITUDE <magtype>,<magvalue>,<author> magnitudeid=<magnitudeID>
 #
-# An EVENT can be followed by multiple ORIGIN lines if the --secondary
+# An EVENT can be followed by multiple ORIGIN lines if the --allorigins
 # option is specified and the primary origin is listed first.  An
 # EVENT may also be followed by one or more MAGNITUDE lines.
 #
@@ -72,6 +72,15 @@
 #  - Print "No data available" when return code is 204 in addition to 404.
 #  - Support for start/end times specified up to microsecond resolution.
 #
+# 2012.206:
+#  - Parse primary magnitude ID and sort it to front of the mag list
+#  - Add -allorigins and -allmags to match new service parameters
+#  - Deprecate secondary option: remove from usage message but leave in code
+#  - Lower-case some previously CamelCase parameter names for consistency
+#
+# 2012.221
+#  - Add limit argument that takes limit:offset (undocumented, for now)
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -82,7 +91,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2012.045";
+my $version = "2012.221";
 
 my $scriptname = basename($0);
 
@@ -108,6 +117,9 @@ my $catalog      = undef;
 my $contributor  = undef;
 my $updatedafter = undef;
 my $altform      = undef;
+my @limitrange   = ();      # (limit:offset)
+my $allorigins   = undef;
+my $allmags      = undef;
 my $secondary    = undef;
 my $orderbymag   = undef;
 
@@ -138,6 +150,9 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
                               'contributor|con=s' => \$contributor,
 			      'updatedafter|ua=s' => \$updatedafter,
                               'altform'           => \$altform,
+			      'limit=s'           => \@limitrange,
+                              'allorigins'        => \$allorigins,
+                              'allmags'           => \$allmags,
                               'secondary'         => \$secondary,
 			      'orderbymag'        => \$orderbymag,
 
@@ -178,7 +193,10 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " --ua date         Limit to origins updated after date (YYYY-MM-DD)\n";
   print "\n";
 #  print " --altform         Print output in an alternate form, default is more parsable\n";
-  print " --secondary       Return secondary origins, default is only primary origins\n";
+#  print " --limit max:off   Limit to max events, optionally starting at offset\n";
+  print " --allorigins      Return all origins, default is only primary origin per event\n";
+  print " --allmags         Return all magnitudes, default is only primary magnitude per event\n";
+#  print " --secondary       Return secondary origins, default is only primary origins\n";
   print " --orderbymag      Order results by magnitude instead of time\n";
   print "\n";
   print " --evid id         Select a specific event by DMC event ID\n";
@@ -186,7 +204,6 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print "\n";
   print " -X xmlfile        Write raw returned XML to xmlfile\n";
   print " -A appname        Application/version string for identification\n";
-#  print " -a user:pass      User and password when authentication is needed\n";
   print "\n";
   print " -o outfile        Write event information to specified file, default: console\n";
   print "\n";
@@ -271,6 +288,16 @@ if ( scalar @magrange ) {
     die "Maximum magnitude out of range: $magrange[1]\n";
   }
 }
+if ( scalar @limitrange ) {
+  @limitrange = split (/\:/, $limitrange[0]);
+
+  if ( $limitrange[0] && ($limitrange[0] < 1) ) {
+    die "Event limit out of range: $limitrange[0]\n";
+  }
+  if ( $limitrange[1] && ($limitrange[1] < 0) ) {
+    die "Event count offset out of range: $limitrange[1]\n";
+  }
+}
 
 # Report data selection criteria
 if ( $verbose > 2 ) {
@@ -279,12 +306,14 @@ if ( $verbose > 2 ) {
   print STDERR "Radius range: $degrange[0] : $degrange[1] : $degrange[2] : $degrange[3]\n" if ( scalar @degrange );
   print STDERR "Depth range: $deprange[0] : $deprange[1]\n" if ( scalar @deprange );
   print STDERR "Magnitude range: $magrange[0] : $magrange[1]\n" if ( scalar @magrange );
+  print STDERR "Magnitude range: $limitrange[0] : $limitrange[1]\n" if ( scalar @limitrange );
 }
 
 # Containers to hold event, origin and magnitude details
 my @eventids = ();
 my %eventname = ();
 my %eventprime = ();
+my %eventprimemag = ();
 my %origins = ();
 my %mags = ();
 
@@ -331,10 +360,16 @@ if ( ! defined $altform ) {
 	    $time,&decimalposition($lat,3),&decimalposition($lon,4),&decimalposition($depth,5),
 	    $author,$catalog,$contributor,($contributoreventid)?",$contributoreventid":"");
 
+    # Generate list of magnitude IDs with primary magnitude first and others sorted on ascending value
+    my @magids = (exists $mags{$eventid}{$eventprimemag{$eventid}}) ? ($eventprimemag{$eventid}) : ();
+    foreach my $magid ( sort { ${$mags{$eventid}{$b}}[1] cmp ${$mags{$eventid}{$a}}[1] } keys %{$mags{$eventid}} ) {
+      push (@magids, $magid) if ( $magid != $eventprimemag{$eventid} );
+    }
+    $totalmags += scalar @magids;
+
     # Print magnitudes
-    foreach my $magnitudeid ( keys %{$mags{$eventid}} ) {
-      $totalmags++;
-      print EVENT "|" . join (',', @{$mags{$eventid}{$magnitudeid}});
+    foreach my $magid ( @magids ) {
+      print EVENT "|" . join (',', @{$mags{$eventid}{$magid}});
     }
 
     # Print event name and newline
@@ -367,6 +402,12 @@ else {
       push (@originids, $originid) if ( $originid != $eventprime{$eventid} );
     }
 
+    # Generate list of magnitude IDs with primary magnitude first and others sorted on ascending value
+    my @magids = (exists $mags{$eventid}{$eventprimemag{$eventid}}) ? ($eventprimemag{$eventid}) : ();
+    foreach my $magid ( sort { ${$mags{$eventid}{$b}}[1] cmp ${$mags{$eventid}{$a}}[1] } keys %{$mags{$eventid}} ) {
+      push (@magids, $magid) if ( $magid != $eventprimemag{$eventid} );
+    }
+
     # Print origin lines
     foreach my $originid ( @originids ) {
       $totalorigins++;
@@ -376,9 +417,9 @@ else {
     }
 
     # Print magnitude lines
-    foreach my $magnitudeid ( keys %{$mags{$eventid}} ) {
+    foreach my $magid ( @magids ) {
       $totalmags++;
-      print EVENT "  MAGNITUDE " . join (',', @{$mags{$eventid}{$magnitudeid}}) . " magnitudeid=$magnitudeid\n";
+      print EVENT "  MAGNITUDE " . join (',', @{$mags{$eventid}{$magid}}) . " magnitudeid=$magid\n";
     }
   }
 }
@@ -416,6 +457,7 @@ sub decimalposition { # decimalposition (value, position)
 #   @eventids - an array containing the returned event IDs in order
 #   %eventname
 #   %eventprime
+#   %eventprimemag
 #   %origins
 #   %mags
 #
@@ -456,10 +498,16 @@ sub FetchEvents {
   $uri .= "&catalog=$catalog" if ( $catalog );
   $uri .= "&contributor=$contributor" if ( $contributor );
   $uri .= "&updatedafter=$updatedafter" if ( $updatedafter );
-  $uri .= "&preferredOnly=no" if ( $secondary );
+  if ( scalar @limitrange ) {
+    $uri .= "&limit=$limitrange[0]" if ( $limitrange[0] );
+    $uri .= "&offset=$limitrange[1]" if ( $limitrange[1] );
+  }
+  $uri .= "&includeallorigins=yes" if ( $allorigins );
+  $uri .= "&includeallmagnitudes=yes" if ( $allmags );
+  $uri .= "&preferredonly=no" if ( $secondary );
 
-  $uri .= "&eventId=$eventid" if ( $eventid );
-  $uri .= "&originId=$originid" if ( $originid );
+  $uri .= "&eventid=$eventid" if ( $eventid );
+  $uri .= "&originid=$originid" if ( $originid );
 
   my $ftime = Time::HiRes::time;
 
@@ -547,6 +595,7 @@ sub FetchEvents {
 
   my $inevent = 0;
   my $inpreferredOriginID = 0;
+  my $inpreferredMagnitudeID = 0;
   my $indescription = 0;
   my $intext = 0;
   my $invalue = 0;
@@ -565,14 +614,14 @@ sub FetchEvents {
 
   my $name = undef;
 
-  my ($name,$eventid,$originid,$porigin,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = (undef) x 12;
+  my ($name,$eventid,$originid,$porigin,$pmagnitude,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = (undef) x 13;
   my ($magnitudeid,$mag,$magtype,$magauthor) = (undef) x 4;
 
   sub start_element {
     my ($self,$element) = @_;
 
     if ( $element->{Name} eq "event" ) {
-      ($name,$eventid,$originid,$porigin,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = (undef) x 12;
+      ($name,$eventid,$originid,$porigin,$pmagnitude,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = (undef) x 13;
       ($magnitudeid,$mag,$magtype,$magauthor) = (undef) x 4;
 
       my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
@@ -583,6 +632,7 @@ sub FetchEvents {
 
     if ( $inevent ) {
       if ( $element->{Name} eq "preferredOriginID" ) { $inpreferredOriginID = 1; }
+      elsif ( $element->{Name} eq "preferredMagnitudeID" ) { $inpreferredMagnitudeID = 1; }
       elsif ( $element->{Name} eq "description" ) { $indescription = 1; }
 
       if ( $indescription && $element->{Name} eq "text" ) { $intext = 1; }
@@ -638,9 +688,10 @@ sub FetchEvents {
 
       $eventname{$eventid} = $name;
       $eventprime{$eventid} = $porigin;
+      $eventprimemag{$eventid} = $pmagnitude;
       $totalevents++;
 
-      ($name,$eventid,$porigin) = (undef) x 3;
+      ($name,$eventid,$porigin,$pmagnitude) = (undef) x 4;
       $inevent = 0;
     }
 
@@ -648,6 +699,10 @@ sub FetchEvents {
       if ( $element->{Name} eq "preferredOriginID" ) {
 	($porigin) = $porigin =~ /.*originId\=(\d+)$/; # Trim preferred origin ID to value
 	$inpreferredOriginID = 0;
+      }
+      elsif ( $element->{Name} eq "preferredMagnitudeID" ) {
+	($pmagnitude) = $pmagnitude =~ /.*magnitudeId\=(\d+)$/; # Trim preferred magnitude ID to value
+	$inpreferredMagnitudeID = 0;
       }
       elsif ( $element->{Name} eq "description" ) { $indescription = 0; }
 
@@ -700,6 +755,7 @@ sub FetchEvents {
     if ( $element->{Data} && $inevent ) {
 
       if ( $inpreferredOriginID ) { $porigin .= $element->{Data}; }
+      elsif ( $inpreferredMagnitudeID ) { $pmagnitude .= $element->{Data}; }
       elsif ( $indescription && $intext ) { $name .= $element->{Data}; }
 
       elsif ( $inorigin ) {
