@@ -1,18 +1,25 @@
-
-## Script is deprecated, broken for now, and unmaintained.
-
 #!/usr/bin/perl
 #
 # FetchData
+#
+# Find the most current version at http://www.iris.edu/ws/wsclients/
+#
+# CHAD, convert to FDSN services
 #
 # Fetch bulk data from the DMC web interfaces.  This program is
 # primarily written to select and fetch waveform data but can also
 # fetch metadata and response information.
 #
-# Installation of the XML::SAX::ExpatXS module will significantly
+# Dependencies: This script should run without problems on Perl
+# release 5.10 or newer, older versions of Perl might require the
+# installation of the following modules (and their dependencies):
+#   XML::SAX
+#   Bundle::LWP (libwww-perl)
+#
+# Installation of the XML::SAX::ExpatXS module can significantly
 # speed up the parsing of metadata results returned as XML.
 #
-# Data selection
+## Data selection
 #
 # Data is generally selected by specifying network, station, location,
 # channel, quality, start time and end time.  The name parameters may
@@ -22,12 +29,23 @@
 #
 # 1) Command line arguments: -N, -S, -L, -C, -Q, -s, -e
 #
-# 2) A selection file containing a list of:
-#    Net Sta Loc Chan Qual Start End
+# 2) A BREQ_FAST formatted file, http://www.iris.edu/manuals/breq_fast.htm
 #
-# 3) A BREQ_FAST formatted file
+# 3) A selection file containing a list of:
+#    Net Sta Loc Chan Start End
 #
-# Data output
+# Example selection file contents:
+# II BFO 00 BHZ 2011-01-01T00:00:00 2011-01-01T01:00:00
+# IU ANMO 00 BHZ 2011-01-01T00:00:00 2011-01-01T01:00:00
+# IU COLA 00 BHZ 2011-01-01T00:00:00 2011-01-01T01:00:00
+#
+# For the command line arguments and the selection file the network,
+# station location and channel fields may contain the common * and ?
+# wildcards, meaning zero-to-many and a single character respectively.
+# These fields may also be comma-separated lists, for example, the
+# network may be specified as II,IU,TA to select three networks.
+#
+## Data output
 #
 # miniSEED: If the -o option is used to specify an output file
 # waveform data will be requested based on the selection and all
@@ -38,8 +56,10 @@
 # contain:
 # "net,sta,loc,chan,lat,lon,elev,depth,azimuth,SACdip,instrument,scale,scalefreq,scaleunits,samplerate,start,end"
 #
-# This metadata file can be used directly with mseed2sac or tracedsp
-# to create SAC files including basic metadata.
+# The dip field in this output will be converted from the SEED to SAC
+# convention by adding 90.  This metadata file can be used directly
+# with mseed2sac or tracedsp to create SAC files including basic
+# metadata.
 #
 # SAC P&Zs: If the -sd option is given SAC Poles and Zeros will be
 # fetched and a file for each channel will be written to the specified
@@ -63,7 +83,7 @@
 #  - Add options to fetch SAC P&Z and RESP data
 #  - Make waveform collection optional
 #  - Limit metadata channel epochs to be within request window
-#  - Print "DONE" when finished
+#  - Print "DONE" to STDERR when finished
 #
 # 2010.154:
 #  - Add -a option to specify authorization credentials
@@ -76,8 +96,23 @@
 #  - Add check for start/end times when requesting waveform data
 #  - Add fetching timers and rate calculations for improved feedback
 #
-# 2010.175:
-#  - Fix rate calculations.
+# 2010.177
+#  - Branch from FetchData to use the bulk data selection webservice,
+#      reorganize quality to be specified as a global selection in URI.
+#
+# 2010.180
+#  - Change quality designation to go into selection block (POST)
+#
+# 2010.188
+#  - Convert component inclination/dip to SAC convention (+90) when
+#  writing metadata to an output file, header field is now "SACdip".
+#
+# 2010.201
+#  - Fix up total download size reporting.
+#
+# 2010.217
+#  - Cleanup some documentation, add warnings about metadata service.
+#  - Print "DONE" and "Received ..." output to STDERR for consistency.
 #
 # 2010.273
 #  - Add -A option to specify an application name/version, this will be
@@ -92,6 +127,70 @@
 #  - Rework metadata parser for changed content (InstrumentSensitivity).
 #  - Add diagnostics and more graceful failure to metadata retrieval.
 #
+# 2011.046
+#  - Save received XML metadata to a temporary file, the PurePerl SAX
+#  XML parser is much faster when working on files.
+#  - Allow comma-separated lists for selection by changing the delimiter
+#  for selection entries.
+#  - Truncate future dates to year 2038 for older versions of HTTP::Date.
+#
+# 2011.067
+#  - Add -msl (minimum segment length) and -lso (longest segment only)
+#
+# 2011.077
+#  - Add undocumented webservice overrides: -msurl, -wsurl, -sacpzurl and -respurl
+#
+# 2011.089
+#  - Fix error message to report unrecognized channels in BREQ_FAST files.
+#
+# 2011.164
+#  - Request data in limited groups and restart waveform requests on errors.
+#  - Add Perl and LWP version to UserAgent and wsclient URL to usage message.
+#  - Print script name and local time when verbose.
+#  - Allow quality in BREQ_FAST to be E.
+#  - Add example of selection file and more comments on lists and wildcarding.
+#
+# 2011.166:
+#  - Fix data request grouping for small time windows, oopsie.
+#
+# 2011.172
+#  - Remove newline and carriage return characters and trailing spaces from
+#  site and instrument strings.
+#
+# 2011.216:
+#  - Add --lat, --lon and --radius selection options.
+#  - Fix handling for selections of multiple time windows.
+#
+# 2011.279:
+#  - Fixed handling of zeros in selections for latitude, longitude and magnitude.
+#
+# 2011.337:
+#  - Print error message text from service on errors.
+#  - Add undocumented -nobs option to prevent printing backspace characters in status.
+#  - Remove "query" portion from base URLs, moving them to the service calls.
+#  - Include local time in output of DONE line.
+#
+# 2012.045:
+#  - Print "No data available" when return code is 204 in addition to 404.
+#  - Support for start/end times specified up to microsecond resolution.
+#  - Allow -- location IDs in BREQ_FAST formatted selections.
+#
+# 2012.066:
+#  - Use the "queryauth" method with the waveform service when authentication
+#  credentials are specified.
+#  - Handle 401 (unauthorized) HTTP return status cleanly.
+#
+# 2012.068:
+#  - Use new starttime and endtime parameters for ws-station instead of
+#  deprecated timewindow.
+#
+# 2012.102:
+#  - Correctly parse epoch times from channel epoch by skipping the new channel
+#  comment dates, this corrects the operating times in the metadata files.
+#
+# 2012.312:
+#  - Fix the RESP file output names to have the correct location ID.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -102,35 +201,47 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2010.342";
+my $version = "2013.031";
+
+my $scriptname = basename($0);
 
 # Web service for metadata
-my $metadataservice = 'http://www.iris.edu/ws/station/query';
+my $metadataservice = 'http://www.iris.edu/ws/station';
 
-# Web service for waveform data
-my $waveformservice = 'http://www.iris.edu/ws/dataselect/query';
+# Web service for bulk waveform data
+my $waveformservice = 'http://service.iris.edu/fdsnws/dataselect';
 
 # Web service for SAC P&Z
-my $sacpzservice = 'http://www.iris.edu/ws/sacpz/query';
+my $sacpzservice = 'http://www.iris.edu/ws/sacpz';
 
 # Web service for RESP
-my $respservice = 'http://www.iris.edu/ws/resp/query';
+my $respservice = 'http://www.iris.edu/ws/resp';
 
 # HTTP UserAgent reported to web services
-my $useragent = "FetchData/$version";
+my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
+
+# Waveform data request group size in terms of station-days
+my $groupstadays = 30;
+
 
 my $usage      = undef;
 my $verbose    = undef;
+my $nobsprint  = undef;
 
 my $net        = undef;
 my $sta        = undef;
 my $loc        = undef;
 my $chan       = undef;
-my $qual       = undef;
+my $qual       = "B";
 my $starttime  = undef;
 my $endtime    = undef;
+my @latrange   = ();      # (minlat:maxlat)
+my @lonrange   = ();      # (minlon:maxlon)
+my @degrange   = ();      # (lat:lon:maxradius[:minradius])
 my $selectfile = undef;
 my $bfastfile  = undef;
+my $mslopt     = undef;
+my $lsoopt     = undef;
 my $appname    = undef;
 my $auth       = undef;
 my $outfile    = undef;
@@ -138,11 +249,11 @@ my $sacpzdir   = undef;
 my $respdir    = undef;
 my $metafile   = undef;
 
-
 # Parse command line arguments
 Getopt::Long::Configure ("bundling_override");
 my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
                               'verbose|v+'     => \$verbose,
+                              'nobs'           => \$nobsprint,
                               'net|N=s'        => \$net,
                               'sta|S=s'        => \$sta,
                               'loc|L=s'        => \$loc,
@@ -150,38 +261,54 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
                               'qual|Q=s'       => \$qual,
 			      'starttime|s=s'  => \$starttime,
 			      'endtime|e=s'    => \$endtime,
+			      'lat=s'          => \@latrange,
+			      'lon=s'          => \@lonrange,
+			      'radius=s'       => \@degrange,
 			      'selectfile|l=s' => \$selectfile,
 			      'bfastfile|b=s'  => \$bfastfile,
+			      'msl=s'          => \$mslopt,
+			      'lso'            => \$lsoopt,
 			      'appname|A=s'    => \$appname,
 			      'auth|a=s'       => \$auth,
 			      'outfile|o=s'    => \$outfile,
 			      'sacpzdir|sd=s'  => \$sacpzdir,
 			      'respdir|rd=s'   => \$respdir,
 			      'metafile|m=s'   => \$metafile,
+			      'msurl=s'        => \$metadataservice,
+			      'wsurl=s'        => \$waveformservice,
+			      'sacpzurl=s'     => \$sacpzservice,
+			      'respurl=s'      => \$respservice,
 			    );
 
 my $required =  ( defined $net || defined $sta ||
 		  defined $loc || defined $chan ||
+		  scalar @latrange || scalar @lonrange || scalar @degrange ||
 		  defined $starttime || defined $endtime ||
 		  defined $selectfile || defined $bfastfile );
 
 if ( ! $getoptsret || $usage || ! $required ) {
-  my $script = basename($0);
-  print "$script: collect waveform data from the IRIS DMC (version $version)\n\n";
-  print "Usage: $script [options]\n\n";
+  print "$scriptname: collect waveform data from the IRIS DMC (version $version)\n";
+  print "http://www.iris.edu/ws/wsclients/\n\n";
+  print "Usage: $scriptname [options]\n\n";
   print " Options:\n";
   print " -v                Increase verbosity, may be specified multiple times\n";
-  print " -N,--net          Network code, default is all\n";
-  print " -S,--sta          Station code, default is all\n";
-  print " -L,--loc          Location ID, default is all\n";
-  print " -C,--chan         Channel codes, default is all\n";
+  print " -N,--net          Network code, list and wildcards (* and ?) accepted\n";
+  print " -S,--sta          Station code, list and wildcards (* and ?) accepted\n";
+  print " -L,--loc          Location ID, list and wildcards (* and ?) accepted\n";
+  print " -C,--chan         Channel codes, list and wildcards (* and ?) accepted\n";
   print " -Q,--qual         Quality indicator, default is best\n";
-  print " -s starttime      Specify start time (YYYY/MM/DD HH:MM:SS)\n";
-  print " -e endtime        Specify end time (YYYY/MM/DD HH:MM:SS)\n";
+  print " -s starttime      Specify start time (YYYY-MM-DD,HH:MM:SS.ssssss)\n";
+  print " -e endtime        Specify end time (YYYY-MM-DD,HH:MM:SS.ssssss)\n";
+  print " --lat min:max     Specify a minimum and/or maximum latitude range\n";
+  print " --lon min:max     Specify a minimum and/or maximum longitude range\n";
+  print " --radius lat:lon:maxradius[:minradius]\n";
+  print "                     Specify circular region with optional minimum radius\n";
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
+  print " -msl length       Limit returned data to a minimum segment length\n";
+  print " -lso              Limit returned data to the longest segment only\n";
   print " -A appname        Application/version string for identification\n";
-  print " -a user:pass      User and password when authentication is needed\n";
+  print " -a user:pass      User and password for access to restricted data\n";
   print "\n";
   print " -o outfile        Fetch waveform data and write to output file\n";
   print " -sd sacpzdir      Fetch SAC P&Zs and write files to sacpzdir\n";
@@ -189,6 +316,12 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -m metafile       Write basic metadata to specified file\n";
   print "\n";
   exit 1;
+}
+
+# Print script name and local time string
+if ( $verbose ) {
+  my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+  printf STDERR "$scriptname ($version) at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec;
 }
 
 # Check for existence of output directories
@@ -205,15 +338,52 @@ if ( $outfile && ( ! defined $selectfile && ! defined $bfastfile &&
   die "Cannot request waveform data without start and end times\n";
 }
 
-# Normalize time strings
+# Normalize time strings given on the command line
 if ( $starttime ) {
-  my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $starttime);
+  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $starttime);
   $starttime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+  $starttime .= ".$subsec" if ( $subsec );
 }
 
 if ( $endtime ) {
-  my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $endtime);
+  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $endtime);
   $endtime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+  $endtime .= ".$subsec" if ( $subsec );
+}
+
+# Validate and prepare lat, lon and radius input
+if ( scalar @latrange ) {
+  @latrange = split (/:/, $latrange[0]);
+
+  if ( defined $latrange[0] && ($latrange[0] < -90.0 || $latrange[0] > 90.0) ) {
+    die "Minimum latitude out of range: $latrange[0]\n";
+  }
+  if ( defined $latrange[1] && ($latrange[1] < -90.0 || $latrange[1] > 90.0) ) {
+    die "Maximum latitude out of range: $latrange[1]\n";
+  }
+}
+if ( scalar @lonrange ) {
+  @lonrange = split (/\:/, $lonrange[0]);
+
+  if ( defined $lonrange[0] && ($lonrange[0] < -180.0 || $lonrange[0] > 180.0) ) {
+    die "Minimum longitude out of range: $lonrange[0]\n";
+  }
+  if ( defined $lonrange[1] && ($lonrange[1] < -180.0 || $lonrange[1] > 180.0) ) {
+    die "Maximum longitude out of range: $lonrange[1]\n";
+  }
+}
+if ( scalar @degrange ) {
+  @degrange = split (/\:/, $degrange[0]);
+
+  if ( scalar @degrange < 3 || scalar @degrange > 4 ) {
+    die "Unrecognized radius specification: @degrange\n";
+  }
+  if ( defined $degrange[0] && ($degrange[0] < -90.0 || $degrange[0] > 90.0) ) {
+    die "Radius latitude out of range: $degrange[0]\n";
+  }
+  if ( defined $degrange[1] && ($degrange[1] < -180.0 || $degrange[1] > 180.0) ) {
+    die "Radius longitude out of range: $degrange[1]\n";
+  }
 }
 
 # An array to hold data selections
@@ -221,8 +391,8 @@ my @selections = ();
 
 # Add command line selection to list
 if ( defined $net || defined $sta || defined $loc || defined $chan ||
-     defined $qual || defined $starttime || defined $endtime ) {
-  push (@selections,"$net,$sta,$loc,$chan,$qual,$starttime,$endtime");
+     defined $starttime || defined $endtime ) {
+  push (@selections,"$net|$sta|$loc|$chan|$starttime|$endtime");
 }
 
 # Read selection list file
@@ -243,6 +413,14 @@ if ( $verbose > 2 ) {
   foreach my $select ( @selections ) {
     print STDERR "    $select\n";
   }
+  print STDERR "Latitude range: $latrange[0] : $latrange[1]\n" if ( scalar @latrange );
+  print STDERR "Longitude range: $lonrange[0] : $lonrange[1]\n" if ( scalar @lonrange );
+  print STDERR "Radius range: $degrange[0] : $degrange[1] : $degrange[2] : $degrange[3]\n" if ( scalar @degrange );
+}
+
+# Add blank request entry if selections have been implicitly identified by location ranges
+if ( ! scalar @selections && (scalar @latrange || scalar @lonrange || scalar @degrange) ) {
+  push (@selections,"|||||");
 }
 
 # An array to hold channel list and metadata
@@ -252,11 +430,11 @@ my $metadataxml;
 
 # Fetch metadata from the station web service
 foreach my $selection ( @selections ) {
-  my ($snet,$ssta,$sloc,$schan,$squal,$sstart,$send) = split (/,/,$selection);
-  &FetchMetaData($snet,$ssta,$sloc,$schan,$squal,$sstart,$send);
+  my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
+  &FetchMetaData($snet,$ssta,$sloc,$schan,$sstart,$send);
 }
 
-# Report complete data requests
+# Report complete data request
 if ( $verbose > 2 ) {
   print STDERR "== Request list ==\n";
   foreach my $req ( sort keys %request ) {
@@ -306,7 +484,8 @@ if ( $metafile ) {
   }
 }
 
-print "DONE\n";
+my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+printf STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec;
 ## End of main
 
 
@@ -317,7 +496,7 @@ print "DONE\n";
 #
 # Selection lines are expected to be in the following form:
 #
-# "Net Sta Loc Chan Qual Start End"
+# "Net Sta Loc Chan Start End"
 #
 # The Net, Sta, Loc and Channel fields are required and can be
 # specified as wildcards.
@@ -331,23 +510,25 @@ sub ReadSelectFile {
     chomp $line;
     next if ( $line =~ /^\#/ ); # Skip comment lines
 
-    my ($net,$sta,$loc,$chan,$qual,$start,$end) = split (' ', $line);
+    my ($net,$sta,$loc,$chan,$start,$end) = split (' ', $line);
 
     next if ( ! defined $chan );
 
     # Normalize time strings
     if ( $start ) {
-      my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $start);
+      my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $start);
       $start = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+      $start .= ".$subsec" if ( $subsec );
     }
 
     if ( $end ) {
-      my ($year,$month,$mday,$hour,$min,$sec) = split (/[-:,.\s\/T]/, $end);
+      my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $end);
       $end = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+      $end .= ".$subsec" if ( $subsec );
     }
 
     # Add selection to global list
-    push (@selections,"$net,$sta,$loc,$chan,$qual,$start,$end");
+    push (@selections,"$net|$sta|$loc|$chan|$start|$end");
   }
 
   close SF;
@@ -365,7 +546,6 @@ sub ReadBFastFile {
 
   open (BF, "<$bfastfile") || die "Cannot open '$bfastfile': $!\n";
 
-  my $qual = undef;
   my $linecount = 0;
   BFLINE: foreach my $line ( <BF> ) {
     chomp $line;
@@ -374,7 +554,7 @@ sub ReadBFastFile {
 
     # Capture .QUALTIY header
     if ( $line =~ /^\.QUALITY .*$/ ) {
-      ($qual) = $line =~ /^\.QUALITY ([DRQMB])/;
+      ($qual) = $line =~ /^\.QUALITY ([DRQMBE])/;
       next;
     }
 
@@ -411,7 +591,7 @@ sub ReadBFastFile {
       print "Unrecognized start min: '$smin', skipping line $linecount\n" if ( $verbose );
       next;
     }
-    if ( $ssec !~ /^\d{1,2}\.?\d{0,4}?$/ ) {
+    if ( $ssec !~ /^\d{1,2}\.?\d{0,6}?$/ ) {
       print "Unrecognized start seconds: '$ssec', skipping line $linecount\n" if ( $verbose );
       next;
     }
@@ -435,7 +615,7 @@ sub ReadBFastFile {
       print "Unrecognized end min: '$emin', skipping line $linecount\n" if ( $verbose );
       next;
     }
-    if ( $esec !~ /^\d{1,2}\.?\d?$/ ) {
+    if ( $esec !~ /^\d{1,2}\.?\d{0,6}?$/ ) {
       print "Unrecognized end seconds: '$esec', skipping line $linecount\n" if ( $verbose );
       next;
     }
@@ -452,14 +632,14 @@ sub ReadBFastFile {
     my $loc = undef;
     $loc = pop @chans if ( scalar @chans == ($count+1) );
 
-    if ( $loc && $loc !~ /^[A-Za-z0-9*?]{1,2}$/ ) {
+    if ( $loc && $loc !~ /^[A-Za-z0-9*?\-]{1,2}$/ ) {
       print "Unrecognized location ID: '$loc', skipping line $linecount\n" if ( $verbose );
       next;
     }
 
     foreach my $chan ( @chans ) {
       if ( $chan !~ /^[A-Za-z0-9*?]{3,3}$/ ) {
-	print "Unrecognized location ID: '$loc', skipping line $linecount\n" if ( $verbose );
+	print "Unrecognized channel codes: '$chan', skipping line $linecount\n" if ( $verbose );
 	next BFLINE;
       }
     }
@@ -471,12 +651,16 @@ sub ReadBFastFile {
     }
 
     # Normalize time strings
+    my ($ssec,$ssub) = split (/\./, $ssec);
     my $start = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $syear, $smon, $sday, $shour, $smin, $ssec);
+    $start .= ".$ssub" if ( $ssub );
+    my ($esec,$esub) = split (/\./, $esec);
     my $end = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $eyear, $emon, $eday, $ehour, $emin, $esec);
+    $end .= ".$esub" if ( $esub );
 
     # Add selection to global list for each channel
     foreach my $chan ( @chans ) {
-      push (@selections,"$net,$sta,$loc,$chan,$qual,$start,$end");
+      push (@selections,"$net|$sta|$loc|$chan|$start|$end");
     }
   }
 
@@ -488,7 +672,11 @@ sub ReadBFastFile {
 # FetchWaveformData:
 #
 # Collect waveform data for each entry in the %request hash.  All
-# returned data is written to the global output file handle.
+# returned data is written to the global output file (outfile).
+#
+# The request list is separatated into groups where the group size is
+# defined in terms of station-days.  If the request for a group fails
+# it will be retried, after too many failures.
 #
 ######################################################################
 sub FetchWaveformData {
@@ -499,46 +687,116 @@ sub FetchWaveformData {
   my $ua = RequestAgent->new(keep_alive => 1);
 
   my $count = 0;
-  my $total = scalar keys %request;
 
-  print STDERR "Fetching waveform data\n" if ( $verbose );
+  # Determine request data groups to avoid single large requests
+  my @grouprequest = ();
+
+  my $groupdays = 0;
+  my $groupidx = 0;
+  my $groupsta = undef;
+  foreach my $req ( sort keys %request ) {
+    my ($wnet,$wsta,$wloc,$wchan,$wstart,$wend) = split (/\|/, $req);
+    $count++;
+
+    # Determine day coverage for this request
+    my $rstartepoch = str2time ($wstart);
+    my $rendepoch = str2time ($wend);
+    my $reqdays = int ((($rendepoch - $rstartepoch) / 86400.0) + 0.5);
+    $reqdays = 1 if ( $reqdays < 1 );
+
+    $groupsta = $wsta if ( ! defined $groupsta );
+
+    # Assume first request for a station represents all channels in terms of days
+    if ( $wsta ne $groupsta ) {
+      $groupdays += $reqdays;
+      $groupsta = $wsta;
+    }
+
+    # If beyond groupstadays move to the next group
+    if ( $groupdays >= $groupstadays ) {
+      $groupdays = 0;
+      $groupidx++;
+    }
+
+    # Add request to current group
+    push (@{$grouprequest[$groupidx]}, "$wnet $wsta $wloc $wchan $wstart $wend");
+  }
+
+  if ( ! $count ) {
+    print STDERR "No data selections to request\n";
+    return;
+  }
+
+  print STDERR "Fetching waveform data ($count selections)\n" if ( $verbose );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
-  foreach my $req ( sort keys %request ) {
-    my ($wnet,$wsta,$wloc,$wchan,$wqual,$wstart,$wend) = split (/\|/, $req);
-    $count++;
-
+  # Request each data group
+  my $groupnum = 1;
+  my $groupcnt = scalar @grouprequest;
+  my $redocnt = 0;
+  my $outoffset = 0;
+  foreach my $groupref ( @grouprequest ) {
+  REDOGROUP:
     # Create web service URI
-    my $uri = "${waveformservice}?net=$wnet&sta=$wsta&loc=$wloc&cha=$wchan";
-    $uri .= "&qual=$wqual" if ( $wqual );
-    $uri .= "&starttime=$wstart" if ( $wstart );
-    $uri .= "&endtime=$wend" if ( $wend );
+    my $query = ( $auth ) ? "queryauth" : "query";
+    my $uri = "${waveformservice}/$query";
+
+    # Create POST data selection: specify options followed by selections
+    my $postdata = "quality=$qual\n";
+    $postdata .= "minimumlength=$mslopt\n" if ( defined $mslopt );
+    $postdata .= "longestonly=true\n" if ( defined $lsoopt );
+
+    foreach my $req ( @{$groupref} ) {
+      $postdata .= "$req\n";
+    }
 
     print STDERR "Waveform URI: '$uri'\n" if ( $verbose > 1 );
+    print STDERR "Data selection (POST):\n$postdata" if ( $verbose > 1 );
 
-    print STDERR "Downloading $wnet.$wsta.$wloc.$wchan ($count/$total) :: Received " if ( $verbose );
+    print STDERR "Downloading waveform data (group $groupnum of $groupcnt) :: " if ( $verbose );
 
     $datasize = 0;
 
     # Fetch waveform data from web service using callback routine
-    my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
+    my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack );
 
-    if ( $response->code == 404 ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
-      $request{$req} = undef;
+    if ( $response->code == 404 || $response->code == 204 ) {
+      print (STDERR "No data available\n") if ( $verbose );
+    }
+    elsif ( $response->code == 401 ) {
+      print (STDERR "Authorization failed, username and password not recognized\n");
+      last;
     }
     elsif ( ! $response->is_success() ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
-	. $response->code . " :: " . status_message($response->code) . "\n";
+      print (STDERR "Error fetching data: "
+	     . $response->code . " :: " . status_message($response->code) . "\n");
+      print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
-      $request{$req} = undef;
+
+      # For real output files rewind position to the end of the last group data
+      seek (OUT, $outoffset, 0) if ( $outfile ne "-" );
+
+      # Retry in 10 seconds or give up if already tried 60 times.
+      if ( $response->code != 400 && $redocnt < 60 ) {
+	print STDERR "Retrying request in 10 seconds\n";
+	sleep 10;
+	$redocnt++;
+	goto REDOGROUP;
+      }
+      else {
+	print STDERR "Too many retries, giving up.\n";
+	last;
+      }
     }
     else {
-      print STDERR "\n" if ( $verbose );
+      printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
     }
 
-    # Add data bytes to global total
+    # Get ready for next group
+    $redocnt = 0;
+    $groupnum++;
+    $outoffset = tell (OUT);
     $totalbytes += $datasize;
   }
 
@@ -546,7 +804,7 @@ sub FetchWaveformData {
 
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $totalbytes/(($duration)?$duration:0.000001);
-  printf ("Received %s of waveform data in %.1f seconds (%s/s)\n",
+  printf (STDERR "Received %s of waveform data in %.1f seconds (%s/s)\n",
 	  sizestring($totalbytes), $duration, sizestring($rate));
 
   # Remove empty file
@@ -578,7 +836,7 @@ sub FetchSACPZ {
     # Skip entries with values not set to 1, perhaps no data was fetched
     next if ( ! defined $request{$req} );
 
-    my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend) = split (/\|/, $req);
+    my ($rnet,$rsta,$rloc,$rchan,$rstart,$rend) = split (/\|/, $req);
     my ($mstart,$mend) = split (/\|/, $request{$req});
     $count++;
 
@@ -594,29 +852,30 @@ sub FetchSACPZ {
     $rend = $mend if ( ! $rend );
 
     # Create web service URI
-    my $uri = "${sacpzservice}?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
+    my $uri = "${sacpzservice}/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
     $uri .= "&starttime=$rstart" if ( $rstart );
     $uri .= "&endtime=$rend" if ( $rend );
 
     print STDERR "SAC-PZ URI: '$uri'\n" if ( $verbose > 1 );
 
-    print STDERR "Downloading $sacpzfile ($count/$total) :: Received " if ( $verbose );
+    print STDERR "Downloading $sacpzfile ($count/$total) :: " if ( $verbose );
 
     $datasize = 0;
 
-    # Fetch waveform data from web service using callback routine
+    # Fetch data from web service using callback routine
     my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
 
-    if ( $response->code == 404 ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+    if ( $response->code == 404 || $response->code == 204 ) {
+      print (STDERR "No data available\n") if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
-	. $response->code . " :: " . status_message($response->code) . "\n";
+      print (STDERR "Error fetching data: "
+	     . $response->code . " :: " . status_message($response->code) . "\n");
+      print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
     }
     else {
-      print STDERR "\n" if ( $verbose );
+      printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
     }
 
     # Add data bytes to global total
@@ -629,9 +888,9 @@ sub FetchSACPZ {
   }
 
   my $duration = Time::HiRes::time - $ftime;
-  my $rate = $datasize/(($duration)?$duration:0.000001);
-  printf ("Received %s of SAC P&Zs in %.1f seconds (%s/s)\n",
-	  sizestring($datasize), $duration, sizestring($rate));
+  my $rate = $totalbytes/(($duration)?$duration:0.000001);
+  printf (STDERR "Received %s of SAC P&Zs in %.1f seconds (%s/s)\n",
+	  sizestring($totalbytes), $duration, sizestring($rate));
 
 } # End of FetchSACPZ
 
@@ -660,12 +919,12 @@ sub FetchRESP {
     # Skip entries with values not set to 1, perhaps no data was fetched
     next if ( ! defined $request{$req} );
 
-    my ($rnet,$rsta,$rloc,$rchan,$rqual,$rstart,$rend) = split (/\|/, $req);
+    my ($rnet,$rsta,$rloc,$rchan,$rstart,$rend) = split (/\|/, $req);
     my ($mstart,$mend) = split (/\|/, $request{$req});
     $count++;
 
     # Translate metadata location ID from "--" to blank
-    my $ploc = ( $loc eq "--" ) ? "" : $loc;
+    my $ploc = ( $rloc eq "--" ) ? "" : $rloc;
 
     # Generate output file name and open
     my $respfile = "$respdir/RESP.$rnet.$rsta.$ploc.$rchan";
@@ -679,29 +938,30 @@ sub FetchRESP {
     $rend = $mend if ( ! $rend );
 
     # Create web service URI
-    my $uri = "${respservice}?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
+    my $uri = "${respservice}/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
     $uri .= "&starttime=$rstart" if ( $rstart );
     $uri .= "&endtime=$rend" if ( $rend );
 
     print STDERR "RESP URI: '$uri'\n" if ( $verbose > 1 );
 
-    print STDERR "Downloading $respfile ($count/$total) :: Received " if ( $verbose );
+    print STDERR "Downloading $respfile ($count/$total) :: " if ( $verbose );
 
     $datasize = 0;
 
-    # Fetch waveform data from web service using callback routine
+    # Fetch data from web service using callback routine
     my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
 
-    if ( $response->code == 404 ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+    if ( $response->code == 404 || $response->code == 204 ) {
+      print (STDERR "No data available\n") if ( $verbose );
     }
     elsif ( ! $response->is_success() ) {
-      print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
-	. $response->code . " :: " . status_message($response->code) . "\n";
+      print (STDERR "Error fetching data: "
+	     . $response->code . " :: " . status_message($response->code) . "\n");
+      print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
     }
     else {
-      print STDERR "\n" if ( $verbose );
+      printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
     }
 
     # Add data bytes to global total
@@ -714,9 +974,9 @@ sub FetchRESP {
   }
 
   my $duration = Time::HiRes::time - $ftime;
-  my $rate = $datasize/(($duration)?$duration:0.000001);
-  printf ("Received %s of RESP in %.1f seconds (%s/s)\n",
-	  sizestring($datasize), $duration, sizestring($rate));
+  my $rate = $totalbytes/(($duration)?$duration:0.000001);
+  printf (STDERR "Received %s of RESP in %.1f seconds (%s/s)\n",
+	  sizestring($totalbytes), $duration, sizestring($rate));
 
 } # End of FetchRESP
 
@@ -734,8 +994,8 @@ sub DLCallBack {
   print OUT $data;
   $datasize += length($data);
 
-  if ( $verbose ) {
-    printf (STDERR " %-10.10s\b\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
+  if ( $verbose && ! $nobsprint ) {
+    printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
   }
 }
 
@@ -756,33 +1016,40 @@ sub DLCallBack {
 #
 ######################################################################
 sub FetchMetaData {
-  my ($rnet,$rsta,$rloc,$rchan,$rstart,$rend) = @_;
+  # These our declared with a wider scope for use in the enclosed package
+  our ($rnet,$rsta,$rloc,$rchan,$rstart,$rend) = @_;
 
   # Create HTTP user agent
   my $ua = RequestAgent->new();
 
-  # Convert request start/end times to epoch times
-  my $rstartepoch = str2time ($rstart);
-  my $rendepoch = str2time ($rend);
-
   # Create web service URI
-  my $uri = "${metadataservice}?level=chan";
+  my $uri = "${metadataservice}/query?level=chan";
   $uri .= "&network=$rnet" if ( $rnet );
   $uri .= "&station=$rsta" if ( $rsta );
   $uri .= "&location=$rloc" if ( $rloc );
   $uri .= "&channel=$rchan" if ( $rchan );
-  if ( $rstart && $rend ) {
-    my ($startdate) = $rstart =~ /^(\d{4,4}-\d{1,2}-\d{1,2}).*$/;
-    my ($enddate) = $rend =~ /^(\d{4,4}-\d{1,2}-\d{1,2}).*$/;
-
-    $uri .= "&timewindow=${startdate},${enddate}";
+  $uri .= "&starttime=$rstart" if ( $rstart );
+  $uri .= "&endtime=$rend" if ( $rend );
+  if ( scalar @latrange ) {
+    $uri .= "&minlat=$latrange[0]" if ( defined $latrange[0] );
+    $uri .= "&maxlat=$latrange[1]" if ( defined $latrange[1] );
+  }
+  if ( scalar @lonrange ) {
+    $uri .= "&minlon=$lonrange[0]" if ( defined $lonrange[0] );
+    $uri .= "&maxlon=$lonrange[1]" if ( defined $lonrange[1] );
+  }
+  if ( scalar @degrange ) {
+    $uri .= "&lat=$degrange[0]" if ( defined $degrange[0] );
+    $uri .= "&lon=$degrange[1]" if ( defined $degrange[1] );
+    $uri .= "&maxradius=$degrange[2]" if ( defined $degrange[2] );
+    $uri .= "&minradius=$degrange[3]" if ( defined $degrange[3] );
   }
 
   my $ftime = Time::HiRes::time;
 
   print STDERR "Metadata URI: '$uri'\n" if ( $verbose > 1 );
 
-  print STDERR "Fetching metadata :: Received " if ( $verbose );
+  print STDERR "Fetching metadata :: " if ( $verbose );
 
   $datasize = 0;
   $metadataxml = "";
@@ -790,17 +1057,18 @@ sub FetchMetaData {
   # Fetch metadata from web service using callback routine
   my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
 
-  if ( $response->code == 404 ) {
-    print STDERR "\b\b\b\b\b\b\b\b\bNo data available\n" if ( $verbose );
+  if ( $response->code == 404 || $response->code == 204 ) {
+    print (STDERR "No data available\n") if ( $verbose );
     return;
   }
   elsif ( ! $response->is_success() ) {
-    print STDERR "\b\b\b\b\b\b\b\b\bError fetching data: "
-      . $response->code . " :: " . status_message($response->code) . "\n";
+    print (STDERR "Error fetching data: "
+	   . $response->code . " :: " . status_message($response->code) . "\n");
+    print STDERR "------\n" . $response->decoded_content . "\n------\n";
     print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
   }
   else {
-    print STDERR "\n" if ( $verbose );
+    printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
   }
 
   my $duration = Time::HiRes::time - $ftime;
@@ -821,8 +1089,28 @@ sub FetchMetaData {
 
   print STDERR "Parsing XML metadata... " if ( $verbose );
 
-  # Parse XML metadata
-  $parser->parse_string ($metadataxml);
+  # Open file to store metadata XML
+  my $metadataxmlfile = "metadata-$$.xml";
+  if ( open (MXML, ">$metadataxmlfile") ) {
+    # Write XML and close file
+    print MXML $metadataxml;
+    close MXML;
+
+    # Parse XML metadata from file
+    $parser->parse_file ($metadataxmlfile);
+
+    # Remove temporary XML metadata file
+    if ( ! unlink $metadataxmlfile ) {
+      print STDERR "Cannot remove temporary XML metadata file: $!\n";
+    }
+  }
+  # Otherwise parse the XML in memory
+  else {
+    printf STDERR " in memory (possibly slow), " if ( $verbose );
+
+    # Parse XML metadata from string
+    $parser->parse_string ($metadataxml);
+  }
 
   printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose );
 
@@ -839,9 +1127,9 @@ sub FetchMetaData {
   use HTTP::Date;
 
   my $inepoch = 0;
+  my $incomments = 0;
   my $instart = 0;
   my $inend = 0;
-  my $inlat = 0;
   my $inlat = 0;
   my $inlon = 0;
   my $inelevation = 0;
@@ -878,7 +1166,8 @@ sub FetchMetaData {
     }
 
     if ( $inepoch ) {
-      if ( $element->{Name} eq "StartDate" ) { $instart = 1; }
+      if ( $element->{Name} =~ /Comments/ ) { $incomments = 1; }
+      elsif ( $element->{Name} eq "StartDate" ) { $instart = 1; }
       elsif ( $element->{Name} eq "EndDate" ) { $inend = 1; }
       elsif ( $element->{Name} eq "Lat" ) { $inlat = 1; }
       elsif ( $element->{Name} eq "Lon" ) { $inlon = 1; }
@@ -921,27 +1210,33 @@ sub FetchMetaData {
       # Translate commas in metadata instrument name to semi-colons
       $instrument =~ s/,/;/g;
 
+      # Remove newlines, returns and trailing spaces in metadata instrument name
+      $instrument =~ s/[\n\r]//g;
+      $instrument =~ s/\s*$//g;
+
       # Trim sensitivity units to short version, they are returned as, e.g. "M/S - Meters per second"
       ($sensunit) = $sensunit =~ /(.*?)\s\-\s.*/ if ( $sensunit );
 
-      # Cleanup start and end strings
-      ($start) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
-      ($end) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      # Cleanup start and end strings, with truncation to 2038-01-01T00:00:00 for older Perls
+      my ($y,$mo,$d,$h,$m,$s) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      my $mstart = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
+      my ($y,$mo,$d,$h,$m,$s) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      my $mend = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
 
       # Push channel epoch metadata into storage array
       push (@metadata, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit");
-
+      
       # Put entry into request hash, value is the widest range of channel epochs
       if ( ! exists  $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} ) {
-	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$start|$end";
+	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$mstart|$mend";
       }
       else {
 	# Track widest metadata start and end range
 	my ($vstart,$vend) = split (/\|/, $request{"$net|$sta|$dloc|$chan|$rstart|$rend"});
-	my $startepoch = str2time ($start);
-	my $endepoch = str2time ($end);
-	$vstart = $start if ( $startepoch < str2time ($vstart) );
-	$vend = $end if ( $endepoch > str2time ($vend) );
+	my $startepoch = str2time ($mstart);
+	my $endepoch = str2time ($mend);
+	$vstart = $mstart if ( $startepoch < str2time ($vstart) );
+	$vend = $mend if ( $endepoch > str2time ($vend) );
 	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$vstart|$vend";
       }
 
@@ -951,7 +1246,8 @@ sub FetchMetaData {
     }
 
     if ( $inepoch ) {
-      if ( $element->{Name} eq "StartDate" ) { $instart = 0; }
+      if ( $element->{Name} =~ /Comments/ ) { $incomments = 0; }
+      elsif ( $element->{Name} eq "StartDate" ) { $instart = 0; }
       elsif ( $element->{Name} eq "EndDate" ) { $inend = 0; }
       elsif ( $element->{Name} eq "Lat" ) { $inlat = 0; }
       elsif ( $element->{Name} eq "Lon" ) { $inlon = 0; }
@@ -977,8 +1273,8 @@ sub FetchMetaData {
     my ($self,$element) = @_;
 
     if ( $element->{Data} ) {
-      if ( $instart ) { $start .= $element->{Data}; }
-      elsif ( $inend ) { $end .= $element->{Data}; }
+      if ( $instart && ! $incomments ) { $start .= $element->{Data}; }
+      elsif ( $inend && ! $incomments ) { $end .= $element->{Data}; }
       elsif ( $inlat ) { $lat .= $element->{Data}; }
       elsif ( $inlon ) { $lon .= $element->{Data}; }
       elsif ( $inelevation ) { $elev .= $element->{Data}; }
@@ -1010,7 +1306,7 @@ sub MDCallBack {
   $metadataxml .= $data;
   $datasize += length($data);
 
-  if ( $verbose ) {
+  if ( $verbose && ! $nobsprint ) {
     printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
   }
 }

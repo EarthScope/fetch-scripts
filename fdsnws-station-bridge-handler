@@ -41,7 +41,7 @@
 #
 # ChangeLog:
 #
-# 2013.031:
+# 2013.035:
 #  - Initial version
 
 use strict;
@@ -52,7 +52,7 @@ use LWP::UserAgent;
 use HTTP::Status qw(status_message);
 use HTTP::Date;
 
-my $version  = "2013.031";
+my $version  = "2013.035";
 
 my $scriptname = basename($0);
 
@@ -183,7 +183,6 @@ if ( defined $usage )
     print STDERR " --station    Station code, list and wildcards (* and ?) accepted\n";
     print STDERR " --location   Location ID, list and wildcards (* and ?) accepted\n";
     print STDERR " --channel    Channel codes, list and wildcards (* and ?) accepted\n";
-    print STDERR " --quality    Quality ID selection, default is 'M' for best data\n";
     print STDERR "\n";
     print STDERR " --minlatitude  Specify minimum latitude in degrees\n";
     print STDERR " --maxlatitude  Specify maximum latitude in degrees\n";
