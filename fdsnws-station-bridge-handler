@@ -43,6 +43,10 @@
 #
 # 2013.035:
 #  - Initial version
+#
+# 2013.042:
+#  - Call UserAgent::env_proxy so that LWP requests use common
+#  environtment variables such as http_proxy.
 
 use strict;
 use Getopt::Long;
@@ -52,7 +56,7 @@ use LWP::UserAgent;
 use HTTP::Status qw(status_message);
 use HTTP::Date;
 
-my $version  = "2013.035";
+my $version  = "2013.042";
 
 my $scriptname = basename($0);
 
@@ -307,6 +311,7 @@ sub HandleRequest ()
   # write returned content to STDOUT using a callback function.
   my $ua = LWP::UserAgent->new();
   $ua->agent($useragent);
+  $ua->env_proxy;
   my $response = $ua->get ($uri, ':content_cb' => \&DLCallBack);
 
   # Translate backend service response codes to expected exit status with messages
