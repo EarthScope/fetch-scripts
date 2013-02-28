@@ -4,11 +4,22 @@
 #
 # Find the most current version at http://www.iris.edu/ws/wsclients/
 #
-# CHAD, convert to FDSN services
+# Fetch data and related metadata from an web services.  The default
+# web service is from the IRIS DMC, other FDSN web services may be
+# specified by setting the following environment variables:
 #
-# Fetch bulk data from the DMC web interfaces.  This program is
-# primarily written to select and fetch waveform data but can also
-# fetch metadata and response information.
+# SERVICEBASE = the base URI of the service(s) to use (http://service.iris.edu/)
+# TIMESERIESSERVICE = complete URI of service (http://service.iris.edu/fdsnws/dataselect/1)
+# METADATASERVICE = complete URI of service (http://service.iris.edu/fdsnws/station/1)
+# SACPZSERVICE = complete URI of service (http://service.iris.edu/irisws/sacpz/1)
+# RESPSERVICE = complete URI of service (http://service.iris.edu/irisws/resp/1)
+#
+# This program is primarily written to select and fetch waveform data
+# but can also fetch metadata and response information if those
+# services exist at the specified data center.  The fdsnws-dataselect
+# service is a minimum requirement for use of this script. The
+# fdsnws-station service is required if metadata is to be retrieved or
+# if geographic selection options are used.
 #
 # Dependencies: This script should run without problems on Perl
 # release 5.10 or newer, older versions of Perl might require the
@@ -76,120 +87,13 @@
 #
 # ## Change history ##
 #
-# 2010.140:
-#  - Initial version
-#
-# 2010.148:
-#  - Add options to fetch SAC P&Z and RESP data
-#  - Make waveform collection optional
-#  - Limit metadata channel epochs to be within request window
-#  - Print "DONE" to STDERR when finished
-#
-# 2010.154:
-#  - Add -a option to specify authorization credentials
-#
-# 2010.164:
-#  - Add download handler and timer for XML metadata for improved feedback
-#  - Use HTTP Keep-Alive connections for waveforms, SACPZs and RESPs
-#
-# 2010.171:
-#  - Add check for start/end times when requesting waveform data
-#  - Add fetching timers and rate calculations for improved feedback
-#
-# 2010.177
-#  - Branch from FetchData to use the bulk data selection webservice,
-#      reorganize quality to be specified as a global selection in URI.
-#
-# 2010.180
-#  - Change quality designation to go into selection block (POST)
-#
-# 2010.188
-#  - Convert component inclination/dip to SAC convention (+90) when
-#  writing metadata to an output file, header field is now "SACdip".
-#
-# 2010.201
-#  - Fix up total download size reporting.
-#
-# 2010.217
-#  - Cleanup some documentation, add warnings about metadata service.
-#  - Print "DONE" and "Received ..." output to STDERR for consistency.
-#
-# 2010.273
-#  - Add -A option to specify an application name/version, this will be
-#  added to the UserAgent string.
-#
-# 2010.342
-#  - Convert metadata fetching to use the production ws-station service
-#  instead of the deprecated service previously used.
-#  - Rearrange and add fields to the metadata file output lines.
-#
-# 2011.020
-#  - Rework metadata parser for changed content (InstrumentSensitivity).
-#  - Add diagnostics and more graceful failure to metadata retrieval.
-#
-# 2011.046
-#  - Save received XML metadata to a temporary file, the PurePerl SAX
-#  XML parser is much faster when working on files.
-#  - Allow comma-separated lists for selection by changing the delimiter
-#  for selection entries.
-#  - Truncate future dates to year 2038 for older versions of HTTP::Date.
-#
-# 2011.067
-#  - Add -msl (minimum segment length) and -lso (longest segment only)
-#
-# 2011.077
-#  - Add undocumented webservice overrides: -msurl, -wsurl, -sacpzurl and -respurl
-#
-# 2011.089
-#  - Fix error message to report unrecognized channels in BREQ_FAST files.
-#
-# 2011.164
-#  - Request data in limited groups and restart waveform requests on errors.
-#  - Add Perl and LWP version to UserAgent and wsclient URL to usage message.
-#  - Print script name and local time when verbose.
-#  - Allow quality in BREQ_FAST to be E.
-#  - Add example of selection file and more comments on lists and wildcarding.
-#
-# 2011.166:
-#  - Fix data request grouping for small time windows, oopsie.
-#
-# 2011.172
-#  - Remove newline and carriage return characters and trailing spaces from
-#  site and instrument strings.
-#
-# 2011.216:
-#  - Add --lat, --lon and --radius selection options.
-#  - Fix handling for selections of multiple time windows.
-#
-# 2011.279:
-#  - Fixed handling of zeros in selections for latitude, longitude and magnitude.
-#
-# 2011.337:
-#  - Print error message text from service on errors.
-#  - Add undocumented -nobs option to prevent printing backspace characters in status.
-#  - Remove "query" portion from base URLs, moving them to the service calls.
-#  - Include local time in output of DONE line.
-#
-# 2012.045:
-#  - Print "No data available" when return code is 204 in addition to 404.
-#  - Support for start/end times specified up to microsecond resolution.
-#  - Allow -- location IDs in BREQ_FAST formatted selections.
-#
-# 2012.066:
-#  - Use the "queryauth" method with the waveform service when authentication
-#  credentials are specified.
-#  - Handle 401 (unauthorized) HTTP return status cleanly.
-#
-# 2012.068:
-#  - Use new starttime and endtime parameters for ws-station instead of
-#  deprecated timewindow.
-#
-# 2012.102:
-#  - Correctly parse epoch times from channel epoch by skipping the new channel
-#  comment dates, this corrects the operating times in the metadata files.
-#
-# 2012.312:
-#  - Fix the RESP file output names to have the correct location ID.
+# 2013.042:
+#  - Rename to FetchData (from FetchBulkData), truncate change log.
+#  - Use the LWP::UserAgent method env_proxy() to check for and use connection
+#  proxy information from environment variables (e.g. http_proxy).
+#  - Add checking of environment variables that will override the web
+#  service base path (i.e. host name).
+#  - Change to allow data requests without metadata fetching.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
 
@@ -201,21 +105,39 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.031";
+my $version = "2013.042";
 
 my $scriptname = basename($0);
 
-# Web service for metadata
-my $metadataservice = 'http://www.iris.edu/ws/station';
+# Default web service base
+my $servicebase = 'http://service.iris.edu';
 
-# Web service for bulk waveform data
-my $waveformservice = 'http://service.iris.edu/fdsnws/dataselect';
+# Check for environment variable overrides for servicebase
+$servicebase = $ENV{'SERVICEBASE'} if ( exists $ENV{'SERVICEBASE'} );
+
+# Web service for time series data
+my $timeseriesservice = "$servicebase/fdsnws/dataselect/1";
+
+# Check for environment variable override for timeseriesservice
+$timeseriesservice = $ENV{'TIMESERIESSERVICE'} if ( exists $ENV{'TIMESERIESSERVICE'} );
+
+# Default web service for metadata
+my $metadataservice = "$servicebase/fdsnws/station/1";
+
+# Check for environment variable override for metadataservice
+$metadataservice = $ENV{'METADATASERVICE'} if ( exists $ENV{'METADATASERVICE'} );
 
 # Web service for SAC P&Z
-my $sacpzservice = 'http://www.iris.edu/ws/sacpz';
+my $sacpzservice = "$servicebase/irisws/sacpz/1";
+
+# Check for environment variable override for sacpzservice
+$sacpzservice = $ENV{'SACPZSERVICE'} if ( exists $ENV{'SACPZSERVICE'} );
 
 # Web service for RESP
-my $respservice = 'http://www.iris.edu/ws/resp';
+my $respservice = "$servicebase/irisws/resp/1";
+
+# Check for environment variable override for respservice
+$respservice = $ENV{'RESPSERVICE'} if ( exists $ENV{'RESPSERVICE'} );
 
 # HTTP UserAgent reported to web services
 my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
@@ -275,7 +197,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
 			      'respdir|rd=s'   => \$respdir,
 			      'metafile|m=s'   => \$metafile,
 			      'msurl=s'        => \$metadataservice,
-			      'wsurl=s'        => \$waveformservice,
+			      'wsurl=s'        => \$timeseriesservice,
 			      'sacpzurl=s'     => \$sacpzservice,
 			      'respurl=s'      => \$respservice,
 			    );
@@ -316,6 +238,10 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -m metafile       Write basic metadata to specified file\n";
   print "\n";
   exit 1;
+}
+
+if ( ! $outfile ) {
+  die "No output file specified, try -h for usage information\n";
 }
 
 # Print script name and local time string
@@ -428,10 +354,28 @@ my %request = (); # Value is metadata range for selection
 my @metadata = ();
 my $metadataxml;
 
-# Fetch metadata from the station web service
-foreach my $selection ( @selections ) {
-  my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
-  &FetchMetaData($snet,$ssta,$sloc,$schan,$sstart,$send);
+# Fetch metadata from the station web service if metadata output file has been
+# specified or if geographic range selection is requested.
+# This processing will populate the request hash with entries matching metadata
+if ( $metafile || scalar @latrange || scalar @lonrange || scalar @degrange ) {
+  foreach my $selection ( @selections ) {
+    my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
+    &FetchMetaData($snet,$ssta,$sloc,$schan,$sstart,$send);
+  }
+}
+# Build request hash directly from selections
+else {
+  foreach my $selection ( @selections ) {
+    my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
+
+    # Subsitute non-specified fields with wildcards
+    $snet = "*" if ( ! $snet );
+    $ssta = "*" if ( ! $ssta );
+    $sloc = "*" if ( ! $sloc );
+    $schan = "*" if ( ! $schan );
+
+    $request{"$snet|$ssta|$sloc|$schan|$sstart|$send"} = "$sstart|$send";
+  }
 }
 
 # Report complete data request
@@ -449,10 +393,10 @@ my $datasize = 0;
 &FetchWaveformData() if ( $outfile );
 
 # Collect SAC P&Zs if output directory specified
-&FetchSACPZ if ( $sacpzdir );
+&FetchSACPZ() if ( $sacpzdir );
 
 # Collect RESP if output directory specified
-&FetchRESP if ( $respdir );
+&FetchRESP() if ( $respdir );
 
 # Write metadata to file
 if ( $metafile ) {
@@ -676,7 +620,7 @@ sub ReadBFastFile {
 #
 # The request list is separatated into groups where the group size is
 # defined in terms of station-days.  If the request for a group fails
-# it will be retried, after too many failures.
+ # it will be retried, after too many failures.
 #
 ######################################################################
 sub FetchWaveformData {
@@ -685,6 +629,7 @@ sub FetchWaveformData {
 
   # Create HTTP user agent
   my $ua = RequestAgent->new(keep_alive => 1);
+  $ua->env_proxy;
 
   my $count = 0;
 
@@ -740,7 +685,7 @@ sub FetchWaveformData {
   REDOGROUP:
     # Create web service URI
     my $query = ( $auth ) ? "queryauth" : "query";
-    my $uri = "${waveformservice}/$query";
+    my $uri = "${timeseriesservice}/$query";
 
     # Create POST data selection: specify options followed by selections
     my $postdata = "quality=$qual\n";
@@ -761,7 +706,7 @@ sub FetchWaveformData {
     # Fetch waveform data from web service using callback routine
     my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack );
 
-    if ( $response->code == 404 || $response->code == 204 ) {
+    if ( $response->code == 204 ) {
       print (STDERR "No data available\n") if ( $verbose );
     }
     elsif ( $response->code == 401 ) {
@@ -823,6 +768,7 @@ sub FetchWaveformData {
 sub FetchSACPZ {
   # Create HTTP user agent
   my $ua = RequestAgent->new(keep_alive => 1);
+  $ua->env_proxy;
 
   my $count = 0;
   my $total = 0;
@@ -906,6 +852,7 @@ sub FetchSACPZ {
 sub FetchRESP {
   # Create HTTP user agent
   my $ua = RequestAgent->new(keep_alive => 1);
+  $ua->env_proxy;
 
   my $count = 0;
   my $total = 0;
@@ -1021,6 +968,7 @@ sub FetchMetaData {
 
   # Create HTTP user agent
   my $ua = RequestAgent->new();
+  $ua->env_proxy;
 
   # Create web service URI
   my $uri = "${metadataservice}/query?level=chan";
@@ -1057,7 +1005,7 @@ sub FetchMetaData {
   # Fetch metadata from web service using callback routine
   my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
 
-  if ( $response->code == 404 || $response->code == 204 ) {
+  if ( $response->code == 204 ) {
     print (STDERR "No data available\n") if ( $verbose );
     return;
   }
@@ -1207,9 +1155,6 @@ sub FetchMetaData {
       # Translate metadata location ID to "--" if it's spaces
       my $dloc = ( $loc eq "  " ) ? "--" : $loc;
 
-      # Translate commas in metadata instrument name to semi-colons
-      $instrument =~ s/,/;/g;
-
       # Remove newlines, returns and trailing spaces in metadata instrument name
       $instrument =~ s/[\n\r]//g;
       $instrument =~ s/\s*$//g;
@@ -1225,7 +1170,7 @@ sub FetchMetaData {
 
       # Push channel epoch metadata into storage array
       push (@metadata, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit");
-      
+
       # Put entry into request hash, value is the widest range of channel epochs
       if ( ! exists  $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} ) {
 	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$mstart|$mend";
