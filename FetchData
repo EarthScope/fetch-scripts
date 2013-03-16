@@ -95,7 +95,21 @@
 #  service base path (i.e. host name).
 #  - Change to allow data requests without metadata fetching.
 #
+# 2013.067:
+#
+#  - Changed metadata parsing to understand FDSN StationXML schema.
+#  - Create override service URLs for ws-sacpz and ws-resp until they
+#  are migrated to service.iris.edu.
+#
+# 2013.074:
+#  - Add work around for bug in Perl's Digest Authorization headers.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
+
+#CHAD:
+#  - RESP and SACPZ may not take wildcards, force metadata expansion when used?
+#
+#  - RESP doesn't seem to work as expected
 
 use strict;
 use File::Basename;
@@ -105,7 +119,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.042";
+my $version = "2013.074";
 
 my $scriptname = basename($0);
 
@@ -129,12 +143,16 @@ $metadataservice = $ENV{'METADATASERVICE'} if ( exists $ENV{'METADATASERVICE'} )
 
 # Web service for SAC P&Z
 my $sacpzservice = "$servicebase/irisws/sacpz/1";
+# Until this service is migrated here is an override
+my $sacpzservice = "http://www.iris.edu/ws/sacpz";
 
 # Check for environment variable override for sacpzservice
 $sacpzservice = $ENV{'SACPZSERVICE'} if ( exists $ENV{'SACPZSERVICE'} );
 
 # Web service for RESP
 my $respservice = "$servicebase/irisws/resp/1";
+# Until this service is migrated here is an override
+my $sacpzservice = "http://www.iris.edu/ws/resp";
 
 # Check for environment variable override for respservice
 $respservice = $ENV{'RESPSERVICE'} if ( exists $ENV{'RESPSERVICE'} );
@@ -197,7 +215,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
 			      'respdir|rd=s'   => \$respdir,
 			      'metafile|m=s'   => \$metafile,
 			      'msurl=s'        => \$metadataservice,
-			      'wsurl=s'        => \$timeseriesservice,
+			      'tsurl=s'        => \$timeseriesservice,
 			      'sacpzurl=s'     => \$sacpzservice,
 			      'respurl=s'      => \$respservice,
 			    );
@@ -240,8 +258,8 @@ if ( ! $getoptsret || $usage || ! $required ) {
   exit 1;
 }
 
-if ( ! $outfile ) {
-  die "No output file specified, try -h for usage information\n";
+if ( ! $outfile && ! $sacpzdir && ! $respdir && ! $metafile ) {
+  die "No output options specified, try -h for usage information\n";
 }
 
 # Print script name and local time string
@@ -628,8 +646,11 @@ sub FetchWaveformData {
   open (OUT, ">$outfile") || die "Cannot open output file '$outfile': $!\n";
 
   # Create HTTP user agent
-  my $ua = RequestAgent->new(keep_alive => 1);
+  my $ua = RequestAgent->new();
   $ua->env_proxy;
+
+  # Add hook to filter Authorization headers for RFC2617 conformance
+  $ua->add_handler(request_send => \&RequestSendAuthFilter);
 
   my $count = 0;
 
@@ -710,7 +731,7 @@ sub FetchWaveformData {
       print (STDERR "No data available\n") if ( $verbose );
     }
     elsif ( $response->code == 401 ) {
-      print (STDERR "Authorization failed, username and password not recognized\n");
+      print (STDERR "AUTHORIZATION FAILED, username and password not recognized\n");
       last;
     }
     elsif ( ! $response->is_success() ) {
@@ -767,7 +788,7 @@ sub FetchWaveformData {
 ######################################################################
 sub FetchSACPZ {
   # Create HTTP user agent
-  my $ua = RequestAgent->new(keep_alive => 1);
+  my $ua = RequestAgent->new();
   $ua->env_proxy;
 
   my $count = 0;
@@ -779,7 +800,7 @@ sub FetchSACPZ {
   my $totalbytes = 0;
 
   foreach my $req ( sort keys %request ) {
-    # Skip entries with values not set to 1, perhaps no data was fetched
+    # Skip entries with values not set, perhaps no data was fetched
     next if ( ! defined $request{$req} );
 
     my ($rnet,$rsta,$rloc,$rchan,$rstart,$rend) = split (/\|/, $req);
@@ -851,7 +872,7 @@ sub FetchSACPZ {
 ######################################################################
 sub FetchRESP {
   # Create HTTP user agent
-  my $ua = RequestAgent->new(keep_alive => 1);
+  my $ua = RequestAgent->new();
   $ua->env_proxy;
 
   my $count = 0;
@@ -971,7 +992,7 @@ sub FetchMetaData {
   $ua->env_proxy;
 
   # Create web service URI
-  my $uri = "${metadataservice}/query?level=chan";
+  my $uri = "${metadataservice}/query?level=channel";
   $uri .= "&network=$rnet" if ( $rnet );
   $uri .= "&station=$rsta" if ( $rsta );
   $uri .= "&location=$rloc" if ( $rloc );
@@ -1074,93 +1095,97 @@ sub FetchMetaData {
   use base qw(XML::SAX::Base);
   use HTTP::Date;
 
-  my $inepoch = 0;
-  my $incomments = 0;
-  my $instart = 0;
-  my $inend = 0;
+  my $inchannel = 0;
   my $inlat = 0;
   my $inlon = 0;
   my $inelevation = 0;
   my $indepth = 0;
   my $inazimuth = 0;
   my $indip = 0;
+  my $insensor = 0;
+  my $insensortype = 0;
   my $insamplerate = 0;
-  my $inequiptype = 0;
 
-  my $intotalsens = 0;
+  my $ininstsens = 0;
   my $insensvalue = 0;
-  my $insensunits = 0;
-  my $infrequency = 0;
+  my $insensfreq = 0;
+  my $ininputunits = 0;
+  my $inunitname = 0;
 
   my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 17;
 
   sub start_element {
     my ($self,$element) = @_;
 
-    if ( $element->{Name} eq "Station" ) {
-      ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 17;
+    if ( $element->{Name} eq "Network" ) {
+      $net = $element->{Attributes}->{'{}code'}->{Value};
+    }
 
-      $net = $element->{Attributes}->{'{}net_code'}->{Value};
-      $sta = $element->{Attributes}->{'{}sta_code'}->{Value};
+    elsif ( $element->{Name} eq "Station" ) {
+      ($sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 16;
+
+      $sta = $element->{Attributes}->{'{}code'}->{Value};
     }
 
     elsif ( $element->{Name} eq "Channel" ) {
-      $loc = $element->{Attributes}->{'{}loc_code'}->{Value};
-      $chan = $element->{Attributes}->{'{}chan_code'}->{Value};
+      $loc = $element->{Attributes}->{'{}locationCode'}->{Value};
+      $chan = $element->{Attributes}->{'{}code'}->{Value};
+      $start = $element->{Attributes}->{'{}startDate'}->{Value};
+      $end = $element->{Attributes}->{'{}endDate'}->{Value};
+      $inchannel = 1;
     }
 
-    elsif ( $element->{Name} eq "Epoch" ) {
-      $inepoch = 1;
-    }
-
-    if ( $inepoch ) {
-      if ( $element->{Name} =~ /Comments/ ) { $incomments = 1; }
-      elsif ( $element->{Name} eq "StartDate" ) { $instart = 1; }
-      elsif ( $element->{Name} eq "EndDate" ) { $inend = 1; }
-      elsif ( $element->{Name} eq "Lat" ) { $inlat = 1; }
-      elsif ( $element->{Name} eq "Lon" ) { $inlon = 1; }
+    if ( $inchannel ) {
+      if ( $element->{Name} eq "Latitude" ) { $inlat = 1; }
+      elsif ( $element->{Name} eq "Longitude" ) { $inlon = 1; }
       elsif ( $element->{Name} eq "Elevation" ) { $inelevation = 1; }
       elsif ( $element->{Name} eq "Depth" ) { $indepth = 1; }
       elsif ( $element->{Name} eq "Azimuth" ) { $inazimuth = 1; }
       elsif ( $element->{Name} eq "Dip" ) { $indip = 1; }
       elsif ( $element->{Name} eq "SampleRate" ) { $insamplerate = 1; }
-
-      elsif ( $element->{Name} eq "EquipType" ) { $inequiptype = 1; }
-
-      elsif ( $element->{Name} eq "InstrumentSensitivity" ) { $intotalsens = 1; }
+      elsif ( $element->{Name} eq "Sensor" ) { $insensor = 1; }
+      elsif ( $element->{Name} eq "InstrumentSensitivity" ) { $ininstsens = 1; }
     }
 
-    if ( $intotalsens ) {
-      if ( $element->{Name} eq "SensitivityValue" ) { $insensvalue = 1; }
-      elsif ( $element->{Name} eq "SensitivityUnits" ) { $insensunits = 1; }
-      elsif ( $element->{Name} eq "Frequency" ) { $infrequency = 1; }
+    if ( $insensor ) {
+      if ( $element->{Name} eq "Type" ) { $insensortype = 1; }
+    }
+
+    if ( $ininstsens ) {
+      if ( $element->{Name} eq "Value" ) { $insensvalue = 1; }
+      elsif ( $element->{Name} eq "Frequency" ) { $insensfreq = 1; }
+      elsif ( $element->{Name} eq "InputUnits" ) { $ininputunits = 1; }
+    }
+
+    if ( $ininputunits ) {
+      if ( $element->{Name} eq "Name" ) { $inunitname = 1; }
     }
   }
 
   sub end_element {
     my ($self,$element) = @_;
 
-    if ( $element->{Name} eq "Station" ) {
-      ($net,$sta) = (undef) x 2;
+    if ( $element->{Name} eq "Network" ) {
+      $net = 0;
+    }
+
+    elsif ( $element->{Name} eq "Station" ) {
+      $sta = 0;
     }
 
     elsif ( $element->{Name} eq "Channel" ) {
-      ($loc,$chan) = (undef) x 2;
-    }
-
-    elsif ( $element->{Name} eq "Epoch" ) {
       # Track epoch count
       $totalepochs++;
 
       # Translate metadata location ID to "--" if it's spaces
       my $dloc = ( $loc eq "  " ) ? "--" : $loc;
 
+      # Translate commas in metadata instrument name to semi-colons
+      $instrument =~ s/,/;/g;
+
       # Remove newlines, returns and trailing spaces in metadata instrument name
       $instrument =~ s/[\n\r]//g;
       $instrument =~ s/\s*$//g;
-
-      # Trim sensitivity units to short version, they are returned as, e.g. "M/S - Meters per second"
-      ($sensunit) = $sensunit =~ /(.*?)\s\-\s.*/ if ( $sensunit );
 
       # Cleanup start and end strings, with truncation to 2038-01-01T00:00:00 for older Perls
       my ($y,$mo,$d,$h,$m,$s) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
@@ -1185,32 +1210,36 @@ sub FetchMetaData {
 	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$vstart|$vend";
       }
 
-      # Reset Epoch level fields
-      ($start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 13;
-      $inepoch = 0;
+      # Reset Channel level fields
+      ($loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 15;
+
+      $inchannel = 0;
     }
 
-    if ( $inepoch ) {
-      if ( $element->{Name} =~ /Comments/ ) { $incomments = 0; }
-      elsif ( $element->{Name} eq "StartDate" ) { $instart = 0; }
-      elsif ( $element->{Name} eq "EndDate" ) { $inend = 0; }
-      elsif ( $element->{Name} eq "Lat" ) { $inlat = 0; }
-      elsif ( $element->{Name} eq "Lon" ) { $inlon = 0; }
+    if ( $inchannel ) {
+      if ( $element->{Name} eq "Latitude" ) { $inlat = 0; }
+      elsif ( $element->{Name} eq "Longitude" ) { $inlon = 0; }
       elsif ( $element->{Name} eq "Elevation" ) { $inelevation = 0; }
       elsif ( $element->{Name} eq "Depth" ) { $indepth = 0; }
       elsif ( $element->{Name} eq "Azimuth" ) { $inazimuth = 0; }
       elsif ( $element->{Name} eq "Dip" ) { $indip = 0; }
       elsif ( $element->{Name} eq "SampleRate" ) { $insamplerate = 0; }
-
-      elsif ( $element->{Name} eq "EquipType" ) { $inequiptype = 0; }
-
-      elsif ( $element->{Name} eq "Response" ) { $intotalsens = 0; }
+      elsif ( $element->{Name} eq "Sensor" ) { $insensor = 0; }
+      elsif ( $element->{Name} eq "InstrumentSensitivity" ) { $ininstsens = 0; }
     }
 
-    if ( $intotalsens ) {
-      if ( $element->{Name} eq "SensitivityValue" ) { $insensvalue = 0; }
-      elsif ( $element->{Name} eq "SensitivityUnits" ) { $insensunits = 0; }
-      elsif ( $element->{Name} eq "Frequency" ) { $infrequency = 0; }
+    if ( $insensor ) {
+      if ( $element->{Name} eq "Type" ) { $insensortype = 0; }
+    }
+
+    if ( $ininstsens ) {
+      if ( $element->{Name} eq "Value" ) { $insensvalue = 0; }
+      elsif ( $element->{Name} eq "Frequency" ) { $insensfreq = 0; }
+      elsif ( $element->{Name} eq "InputUnits" ) { $ininputunits = 0; }
+    }
+
+    if ( $ininputunits ) {
+      if ( $element->{Name} eq "Name" ) { $inunitname = 0; }
     }
   }
 
@@ -1218,9 +1247,7 @@ sub FetchMetaData {
     my ($self,$element) = @_;
 
     if ( $element->{Data} ) {
-      if ( $instart && ! $incomments ) { $start .= $element->{Data}; }
-      elsif ( $inend && ! $incomments ) { $end .= $element->{Data}; }
-      elsif ( $inlat ) { $lat .= $element->{Data}; }
+      if ( $inlat ) { $lat .= $element->{Data}; }
       elsif ( $inlon ) { $lon .= $element->{Data}; }
       elsif ( $inelevation ) { $elev .= $element->{Data}; }
       elsif ( $indepth ) { $depth .= $element->{Data}; }
@@ -1228,11 +1255,11 @@ sub FetchMetaData {
       elsif ( $indip ) { $dip .= $element->{Data}; }
       elsif ( $insamplerate ) { $samplerate .= $element->{Data}; }
 
-      elsif ( $inequiptype ) { $instrument .= $element->{Data}; }
+      elsif ( $insensortype ) { $instrument .= $element->{Data}; }
 
       elsif ( $insensvalue ) { $sens .= $element->{Data}; }
-      elsif ( $insensunits ) { $sensunit .= $element->{Data}; }
-      elsif ( $infrequency ) { $sensfreq .= $element->{Data}; }
+      elsif ( $insensfreq ) { $sensfreq .= $element->{Data}; }
+      elsif ( $inunitname ) { $sensunit .= $element->{Data}; }
     }
   } # End of SAX MDSHandler
 } # End of FetchMetaData()
@@ -1287,6 +1314,38 @@ sub sizestring { # sizestring (bytes)
 
 
 ######################################################################
+# RequestSendAuthFilter (request, ua, h):
+#
+# This routine is expected to be registered as handler for the
+# 'request_send' callback from UserAgent.
+#
+# Rewrite the Authorization header for a HTTP::Request object to
+# remove quotes from the values for the 'qop' and 'nc' fields.  This
+# is required for conformance to RFC2617 and some versions of Perl's
+# libwww (LWP) incorrectly quotes these values.
+######################################################################
+sub RequestSendAuthFilter {
+  my $req = shift;
+
+  if ( $req->header('Authorization') ) {
+    my $authheader = $req->header('Authorization');
+
+    # Extract qop and nc values without quotes
+    my ($qopvalue) = $authheader =~ /qop="(.+?)"/;
+    my ($ncvalue) = $authheader =~ /nc="(.+?)"/;
+
+    # Replace quoted with non-quoted values and reset the Authorization header value
+    $authheader =~ s/qop="(.+?)"/qop=$qopvalue/;
+    $authheader =~ s/nc="(.+?)"/nc=$ncvalue/;
+
+    $req->header('Authorization' => $authheader);
+  }
+
+  return;
+}
+
+
+######################################################################
 #
 # Package RequestAgent: a superclass for LWP::UserAgent with override
 # of LWP::UserAgent methods to set default user agent and handle
@@ -1334,3 +1393,4 @@ BEGIN {
       }
     }
 } # End of LWP::UserAgent override
+
