@@ -2,9 +2,14 @@
 #
 # FetchMetadata
 #
-# Find the most current version at http://www.iris.edu/ws/wsclients/
+# Find the most current version at http://service.iris.edu/clients/
 #
-# Fetch metadata from the DMC web interfaces.
+# Fetch metadata from a web service.  The default web service is from
+# the IRIS DMC, other FDSN web services may be specified by setting
+# the following environment variables:
+#
+# SERVICEBASE = the base URI of the service(s) to use (http://service.iris.edu/)
+# METADATAWS = complete URI of service (http://service.iris.edu/fdsnws/station/1)
 #
 # Dependencies: This script should run without problems on Perl
 # release 5.10 or newer, older versions of Perl might require the
@@ -124,6 +129,14 @@
 #  - Use vertical bars as field separators instead of commas, do not translate commas.
 #  - Do not convert dip to SAC convention, leave it in SEED convention.
 #
+# 2013.077:
+#  - Changed metadata parsing to understand FDSN StationXML schema.
+#  - Use the LWP::UserAgent method env_proxy() to check for and use connection
+#  proxy information from environment variables (e.g. http_proxy).
+#  - Add checking of environment variables that will override the web
+#  service base path (i.e. host name).
+#
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -134,12 +147,21 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2012.234";
+my $version  = "2013.077";
 
 my $scriptname = basename($0);
 
-# Web service for metadata
-my $metadataservice = 'http://www.iris.edu/ws/station';
+# Default web service base
+my $servicebase = 'http://service.iris.edu';
+
+# Check for environment variable overrides for servicebase
+$servicebase = $ENV{'SERVICEBASE'} if ( exists $ENV{'SERVICEBASE'} );
+
+# Default web service for metadata
+my $metadataservice = "$servicebase/fdsnws/station/1";
+
+# Check for environment variable override for metadataservice
+$metadataservice = $ENV{'METADATAWS'} if ( exists $ENV{'METADATAWS'} );
 
 # HTTP UserAgent reported to web services
 my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
@@ -193,8 +215,8 @@ my $required =  ( defined $net || defined $sta ||
 		  defined $selectfile || defined $bfastfile );
 
 if ( ! $getoptsret || $usage || ! $required ) {
-  print "$scriptname: collect basic channel metadata from the IRIS DMC ($version)\n";
-  print "http://www.iris.edu/ws/wsclients/\n\n";
+  print "$scriptname: collect channel metadata ($version)\n";
+  print "http://service.iris.edu/clients/\n\n";
   print "Usage: $scriptname [options]\n\n";
   print " Options:\n";
   print " -v                Increase verbosity, may be specified multiple times\n";
@@ -205,13 +227,12 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -s starttime      Specify start time (YYYY-MM-DD,HH:MM:SS)\n";
   print " -e endtime        Specify end time (YYYY-MM-DD,HH:MM:SS)\n";
   print " -ua date          Limit to metadata updated after date (YYYY-MM-DD)\n";
-  print " -X xmlfile        Write raw returned XML to xmlfile\n";
+  print " -X xmlfile        Write raw returned FDSN StationXML to xmlfile\n";
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
   print " -sta              Print station level information, default is channel\n";
   print " -resp             Request response level information, no details printed\n";
   print " -A appname        Application/version string for identification\n";
-#  print " -a user:pass      User and password when authentication is needed\n";
   print "\n";
   print " -o outfile        Write basic metadata to specified file instead of printing\n";
   print "\n";
@@ -302,7 +323,7 @@ if ( $metafile ) {
 
     foreach my $channel ( @metadata ) {
       my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) =
-	split (/,/, $channel);
+	split (/\|/, $channel);
 
       $sensfreq = sprintf ("%0g", $sensfreq);
       $samplerate = sprintf ("%0g", $samplerate);
@@ -321,7 +342,7 @@ if ( $metafile ) {
     print META "#net|sta|lat|lon|elev|site|start|end\n";
 
     foreach my $station ( @metadata ) {
-      my ($net,$sta,$start,$end,$lat,$lon,$elev,$site) = split (/,/, $station);
+      my ($net,$sta,$start,$end,$lat,$lon,$elev,$site) = split (/\|/, $station);
 
       print META "$net|$sta|$lat|$lon|$elev|$site|$start|$end\n";
     }
@@ -515,12 +536,7 @@ sub ReadBFastFile {
 #
 # Resulting metadata is placed in the global @metadata array with each
 # entry taking the following form:
-#   "net,sta,loc,chan,start,end,lat,lon,elev,depth,azimuth,dip,instrument,samplerate,sensitivity,sensfreq,sensunits"
-#
-# In addition, an entry for the unique NSLCQ time-window is added to
-# the %request hash, used later to request data.  The value of the
-# request hash entries is maintained to be the range of Channel epochs
-# that match the time selection.
+#   "net|sta|loc|chan|start|end|lat|lon|elev|depth|azimuth|dip|instrument|samplerate|sensitivity|sensfreq|sensunits"
 #
 ######################################################################
 sub FetchMetaData {
@@ -528,10 +544,11 @@ sub FetchMetaData {
 
   # Create HTTP user agent
   my $ua = RequestAgent->new();
+  $ua->env_proxy;
 
-  my $level = "chan";
-  $level = "sta" if ( $stalevel );
-  $level = "resp" if ( $resplevel );
+  my $level = "channel";
+  $level = "station" if ( $stalevel );
+  $level = "response" if ( $resplevel );
 
   # Create web service URI
   my $uri = "${metadataservice}/query?level=$level";
@@ -555,7 +572,7 @@ sub FetchMetaData {
   # Fetch metadata from web service using callback routine
   my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
 
-  if ( $response->code == 404 || $response->code == 204 ) {
+  if ( $response->code == 204 ) {
     print (STDERR "No data available\n") if ( $verbose );
     return;
   }
@@ -628,86 +645,90 @@ sub FetchMetaData {
 
   ## End of this routine, below is the XML parsing handlers used above
 
-  ## Beginning of SAX MDSHandlerChannel, event-based streaming XML parsing for Channel level StationXML
+  ## Beginning of SAX MDSHandlerChannel, event-based streaming XML parsing for Channel level FDSN StationXML
   package MDSHandlerChannel;
   use base qw(XML::SAX::Base);
   use HTTP::Date;
 
-  my $inepoch = 0;
-  my $incomments = 0;
-  my $instart = 0;
-  my $inend = 0;
+  my $inchannel = 0;
   my $inlat = 0;
   my $inlon = 0;
   my $inelevation = 0;
   my $indepth = 0;
   my $inazimuth = 0;
   my $indip = 0;
+  my $insensor = 0;
+  my $insensortype = 0;
   my $insamplerate = 0;
-  my $inequiptype = 0;
 
-  my $intotalsens = 0;
+  my $ininstsens = 0;
   my $insensvalue = 0;
-  my $insensunits = 0;
-  my $infrequency = 0;
+  my $insensfreq = 0;
+  my $ininputunits = 0;
+  my $inunitname = 0;
 
   my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 17;
 
   sub start_element {
     my ($self,$element) = @_;
 
-    if ( $element->{Name} eq "Station" ) {
-      ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 17;
+    if ( $element->{Name} eq "Network" ) {
+      $net = $element->{Attributes}->{'{}code'}->{Value};
+    }
 
-      $net = $element->{Attributes}->{'{}net_code'}->{Value};
-      $sta = $element->{Attributes}->{'{}sta_code'}->{Value};
+    elsif ( $element->{Name} eq "Station" ) {
+      ($sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 16;
+
+      $sta = $element->{Attributes}->{'{}code'}->{Value};
     }
 
     elsif ( $element->{Name} eq "Channel" ) {
-      $loc = $element->{Attributes}->{'{}loc_code'}->{Value};
-      $chan = $element->{Attributes}->{'{}chan_code'}->{Value};
+      $loc = $element->{Attributes}->{'{}locationCode'}->{Value};
+      $chan = $element->{Attributes}->{'{}code'}->{Value};
+      $start = $element->{Attributes}->{'{}startDate'}->{Value};
+      $end = $element->{Attributes}->{'{}endDate'}->{Value};
+      $inchannel = 1;
     }
 
-    elsif ( $element->{Name} eq "Epoch" ) {
-      $inepoch = 1;
-    }
-
-    if ( $inepoch ) {
-      if ( $element->{Name} =~ /Comments/ ) { $incomments = 1; }
-      elsif ( $element->{Name} eq "StartDate" ) { $instart = 1; }
-      elsif ( $element->{Name} eq "EndDate" ) { $inend = 1; }
-      elsif ( $element->{Name} eq "Lat" ) { $inlat = 1; }
-      elsif ( $element->{Name} eq "Lon" ) { $inlon = 1; }
+    if ( $inchannel ) {
+      if ( $element->{Name} eq "Latitude" ) { $inlat = 1; }
+      elsif ( $element->{Name} eq "Longitude" ) { $inlon = 1; }
       elsif ( $element->{Name} eq "Elevation" ) { $inelevation = 1; }
       elsif ( $element->{Name} eq "Depth" ) { $indepth = 1; }
       elsif ( $element->{Name} eq "Azimuth" ) { $inazimuth = 1; }
       elsif ( $element->{Name} eq "Dip" ) { $indip = 1; }
       elsif ( $element->{Name} eq "SampleRate" ) { $insamplerate = 1; }
-
-      elsif ( $element->{Name} eq "EquipType" ) { $inequiptype = 1; }
-
-      elsif ( $element->{Name} eq "InstrumentSensitivity" ) { $intotalsens = 1; }
+      elsif ( $element->{Name} eq "Sensor" ) { $insensor = 1; }
+      elsif ( $element->{Name} eq "InstrumentSensitivity" ) { $ininstsens = 1; }
     }
 
-    if ( $intotalsens ) {
-      if ( $element->{Name} eq "SensitivityValue" ) { $insensvalue = 1; }
-      elsif ( $element->{Name} eq "SensitivityUnits" ) { $insensunits = 1; }
-      elsif ( $element->{Name} eq "Frequency" ) { $infrequency = 1; }
+    if ( $insensor ) {
+      if ( $element->{Name} eq "Type" ) { $insensortype = 1; }
+    }
+
+    if ( $ininstsens ) {
+      if ( $element->{Name} eq "Value" ) { $insensvalue = 1; }
+      elsif ( $element->{Name} eq "Frequency" ) { $insensfreq = 1; }
+      elsif ( $element->{Name} eq "InputUnits" ) { $ininputunits = 1; }
+    }
+
+    if ( $ininputunits ) {
+      if ( $element->{Name} eq "Name" ) { $inunitname = 1; }
     }
   }
 
   sub end_element {
     my ($self,$element) = @_;
 
-    if ( $element->{Name} eq "Station" ) {
-      ($net,$sta) = (undef) x 2;
+    if ( $element->{Name} eq "Network" ) {
+      $net = 0;
+    }
+
+    elsif ( $element->{Name} eq "Station" ) {
+      $sta = 0;
     }
 
     elsif ( $element->{Name} eq "Channel" ) {
-      ($loc,$chan) = (undef) x 2;
-    }
-
-    elsif ( $element->{Name} eq "Epoch" ) {
       # Track epoch count
       $totalepochs++;
 
@@ -718,42 +739,42 @@ sub FetchMetaData {
       $instrument =~ s/[\n\r]//g;
       $instrument =~ s/\s*$//g;
 
-      # Trim sensitivity units to short version, they are returned as, e.g. "M/S - Meters per second"
-      ($sensunit) = $sensunit =~ /(.*?)\s\-\s.*/ if ( $sensunit );
-
       # Cleanup start and end strings
       ($start) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
       ($end) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
 
       # Push channel epoch metadata into storage array
-      push (@metadata, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit");
+      push (@metadata, "$net|$sta|$dloc|$chan|$start|$end|$lat|$lon|$elev|$depth|$azimuth|$dip|$instrument|$samplerate|$sens|$sensfreq|$sensunit");
 
       # Reset Epoch level fields
-      ($start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 13;
-      $inepoch = 0;
+      ($loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 15;
+      $inchannel = 0;
     }
 
-    if ( $inepoch ) {
-      if ( $element->{Name} =~ /Comments/ ) { $incomments = 0; }
-      elsif ( $element->{Name} eq "StartDate" ) { $instart = 0; }
-      elsif ( $element->{Name} eq "EndDate" ) { $inend = 0; }
-      elsif ( $element->{Name} eq "Lat" ) { $inlat = 0; }
-      elsif ( $element->{Name} eq "Lon" ) { $inlon = 0; }
+    if ( $inchannel ) {
+      if ( $element->{Name} eq "Latitude" ) { $inlat = 0; }
+      elsif ( $element->{Name} eq "Longitude" ) { $inlon = 0; }
       elsif ( $element->{Name} eq "Elevation" ) { $inelevation = 0; }
       elsif ( $element->{Name} eq "Depth" ) { $indepth = 0; }
       elsif ( $element->{Name} eq "Azimuth" ) { $inazimuth = 0; }
       elsif ( $element->{Name} eq "Dip" ) { $indip = 0; }
       elsif ( $element->{Name} eq "SampleRate" ) { $insamplerate = 0; }
-
-      elsif ( $element->{Name} eq "EquipType" ) { $inequiptype = 0; }
-
-      elsif ( $element->{Name} eq "Response" ) { $intotalsens = 0; }
+      elsif ( $element->{Name} eq "Sensor" ) { $insensor = 0; }
+      elsif ( $element->{Name} eq "InstrumentSensitivity" ) { $ininstsens = 0; }
     }
 
-    if ( $intotalsens ) {
-      if ( $element->{Name} eq "SensitivityValue" ) { $insensvalue = 0; }
-      elsif ( $element->{Name} eq "SensitivityUnits" ) { $insensunits = 0; }
-      elsif ( $element->{Name} eq "Frequency" ) { $infrequency = 0; }
+    if ( $insensor ) {
+      if ( $element->{Name} eq "Type" ) { $insensortype = 0; }
+    }
+
+    if ( $ininstsens ) {
+      if ( $element->{Name} eq "Value" ) { $insensvalue = 0; }
+      elsif ( $element->{Name} eq "Frequency" ) { $insensfreq = 0; }
+      elsif ( $element->{Name} eq "InputUnits" ) { $ininputunits = 0; }
+    }
+
+    if ( $ininputunits ) {
+      if ( $element->{Name} eq "Name" ) { $inunitname = 0; }
     }
   }
 
@@ -761,9 +782,7 @@ sub FetchMetaData {
     my ($self,$element) = @_;
 
     if ( $element->{Data} ) {
-      if ( $instart && ! $incomments ) { $start .= $element->{Data}; }
-      elsif ( $inend && ! $incomments ) { $end .= $element->{Data}; }
-      elsif ( $inlat ) { $lat .= $element->{Data}; }
+      if ( $inlat ) { $lat .= $element->{Data}; }
       elsif ( $inlon ) { $lon .= $element->{Data}; }
       elsif ( $inelevation ) { $elev .= $element->{Data}; }
       elsif ( $indepth ) { $depth .= $element->{Data}; }
@@ -771,22 +790,20 @@ sub FetchMetaData {
       elsif ( $indip ) { $dip .= $element->{Data}; }
       elsif ( $insamplerate ) { $samplerate .= $element->{Data}; }
 
-      elsif ( $inequiptype ) { $instrument .= $element->{Data}; }
+      elsif ( $insensortype ) { $instrument .= $element->{Data}; }
 
       elsif ( $insensvalue ) { $sens .= $element->{Data}; }
-      elsif ( $insensunits ) { $sensunit .= $element->{Data}; }
-      elsif ( $infrequency ) { $sensfreq .= $element->{Data}; }
+      elsif ( $insensfreq ) { $sensfreq .= $element->{Data}; }
+      elsif ( $inunitname ) { $sensunit .= $element->{Data}; }
     }
   } # End of SAX MDSHandlerChannel
 
-  ## Beginning of SAX MDSHandlerStation, event-based streaming XML parsing for Station level StationXML
+  ## Beginning of SAX MDSHandlerStation, event-based streaming XML parsing for Station level FDSN StationXML
   package MDSHandlerStation;
   use base qw(XML::SAX::Base);
   use HTTP::Date;
 
-  my $instationepoch = 0;
-  my $instart = 0;
-  my $inend = 0;
+  my $instation = 0;
   my $inlat = 0;
   my $inlon = 0;
   my $inelevation = 0;
@@ -798,22 +815,22 @@ sub FetchMetaData {
   sub start_element {
     my ($self,$element) = @_;
 
-    if ( $element->{Name} eq "Station" ) {
-      ($net,$sta,$start,$end,$lat,$lon,$elev,$site) = (undef) x 8;
-
-      $net = $element->{Attributes}->{'{}net_code'}->{Value};
-      $sta = $element->{Attributes}->{'{}sta_code'}->{Value};
+    if ( $element->{Name} eq "Network" ) {
+      $net = $element->{Attributes}->{'{}code'}->{Value};
     }
 
-    elsif ( $element->{Name} eq "StationEpoch" ) {
-      $instationepoch = 1;
+    elsif ( $element->{Name} eq "Station" ) {
+      ($sta,$start,$end,$lat,$lon,$elev,$site) = (undef) x 7;
+
+      $sta = $element->{Attributes}->{'{}code'}->{Value};
+      $start = $element->{Attributes}->{'{}startDate'}->{Value};
+      $end = $element->{Attributes}->{'{}endDate'}->{Value};
+      $instation = 1;
     }
 
-    if ( $instationepoch ) {
-      if ( $element->{Name} eq "StartDate" ) { $instart = 1; }
-      elsif ( $element->{Name} eq "EndDate" ) { $inend = 1; }
-      elsif ( $element->{Name} eq "Lat" ) { $inlat = 1; }
-      elsif ( $element->{Name} eq "Lon" ) { $inlon = 1; }
+    if ( $instation ) {
+      if ( $element->{Name} eq "Latitude" ) { $inlat = 1; }
+      elsif ( $element->{Name} eq "Longitude" ) { $inlon = 1; }
       elsif ( $element->{Name} eq "Elevation" ) { $inelevation = 1; }
       elsif ( $element->{Name} eq "Site" ) { $insite = 1; }
     }
@@ -826,11 +843,11 @@ sub FetchMetaData {
   sub end_element {
     my ($self,$element) = @_;
 
-    if ( $element->{Name} eq "Station" ) {
-      ($net,$sta) = (undef) x 2;
+    if ( $element->{Name} eq "Network" ) {
+      $net = 0;
     }
 
-    elsif ( $element->{Name} eq "StationEpoch" ) {
+    elsif ( $element->{Name} eq "Station" ) {
       # Track epoch count
       $totalepochs++;
 
@@ -843,18 +860,16 @@ sub FetchMetaData {
       ($end) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
 
       # Push channel epoch metadata into storage array
-      push (@metadata, "$net,$sta,$start,$end,$lat,$lon,$elev,$site");
+      push (@metadata, "$net|$sta|$start|$end|$lat|$lon|$elev|$site");
 
       # Reset StationEpoch level fields
-      ($start,$end,$lat,$lon,$elev,$site) = (undef) x 6;
-      $inepoch = 0;
+      ($sta,$start,$end,$lat,$lon,$elev,$site) = (undef) x 7;
+      $instation = 0;
     }
 
-    if ( $instationepoch ) {
-      if ( $element->{Name} eq "StartDate" ) { $instart = 0; }
-      elsif ( $element->{Name} eq "EndDate" ) { $inend = 0; }
-      elsif ( $element->{Name} eq "Lat" ) { $inlat = 0; }
-      elsif ( $element->{Name} eq "Lon" ) { $inlon = 0; }
+    if ( $instation ) {
+      if ( $element->{Name} eq "Latitude" ) { $inlat = 0; }
+      elsif ( $element->{Name} eq "Longitude" ) { $inlon = 0; }
       elsif ( $element->{Name} eq "Elevation" ) { $inelevation = 0; }
       elsif ( $element->{Name} eq "Site" ) { $insite = 0; }
     }
@@ -868,9 +883,7 @@ sub FetchMetaData {
     my ($self,$element) = @_;
 
     if ( $element->{Data} ) {
-      if ( $instart ) { $start .= $element->{Data}; }
-      elsif ( $inend ) { $end .= $element->{Data}; }
-      elsif ( $inlat ) { $lat .= $element->{Data}; }
+      if ( $inlat ) { $lat .= $element->{Data}; }
       elsif ( $inlon ) { $lon .= $element->{Data}; }
       elsif ( $inelevation ) { $elev .= $element->{Data}; }
 
