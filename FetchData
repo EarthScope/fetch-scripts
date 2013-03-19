@@ -4,8 +4,8 @@
 #
 # Find the most current version at http://service.iris.edu/clients/
 #
-# Fetch data and related metadata from an web services.  The default
-# web service is from the IRIS DMC, other FDSN web services may be
+# Fetch data and related metadata from web services.  The default web
+# service are from the IRIS DMC, other FDSN web services may be
 # specified by setting the following environment variables:
 #
 # SERVICEBASE = the base URI of the service(s) to use (http://service.iris.edu/)
@@ -94,7 +94,6 @@
 #  - Change to allow data requests without metadata fetching.
 #
 # 2013.067:
-#
 #  - Changed metadata parsing to understand FDSN StationXML schema.
 #  - Create override service URLs for ws-sacpz and ws-resp until they
 #  are migrated to service.iris.edu.
@@ -102,7 +101,7 @@
 # 2013.074:
 #  - Add work around for bug in Perl's Digest Authorization headers
 #  that conflicts with pedantic behavior of Apache Tomcat, eventually
-#  Tomcat will be more lenient and this fix will be removed.
+#  Tomcat will be more lenient and this work around will be removed.
 #
 # 2013.077:
 #  - Convert metadata output line to be bar (|) separated instead of
@@ -119,7 +118,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.074";
+my $version = "2013.077";
 
 my $scriptname = basename($0);
 
