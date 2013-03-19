@@ -2,17 +2,17 @@
 #
 # FetchData
 #
-# Find the most current version at http://www.iris.edu/ws/wsclients/
+# Find the most current version at http://service.iris.edu/clients/
 #
 # Fetch data and related metadata from an web services.  The default
 # web service is from the IRIS DMC, other FDSN web services may be
 # specified by setting the following environment variables:
 #
 # SERVICEBASE = the base URI of the service(s) to use (http://service.iris.edu/)
-# TIMESERIESSERVICE = complete URI of service (http://service.iris.edu/fdsnws/dataselect/1)
-# METADATASERVICE = complete URI of service (http://service.iris.edu/fdsnws/station/1)
-# SACPZSERVICE = complete URI of service (http://service.iris.edu/irisws/sacpz/1)
-# RESPSERVICE = complete URI of service (http://service.iris.edu/irisws/resp/1)
+# TIMESERIESWS = complete URI of service (http://service.iris.edu/fdsnws/dataselect/1)
+# METADATAWS = complete URI of service (http://service.iris.edu/fdsnws/station/1)
+# SACPZWS = complete URI of service (http://service.iris.edu/irisws/sacpz/1)
+# RESPWS = complete URI of service (http://service.iris.edu/irisws/resp/1)
 #
 # This program is primarily written to select and fetch waveform data
 # but can also fetch metadata and response information if those
@@ -65,12 +65,10 @@
 # metadata: If the -m option is used to specifiy a metadata file a
 # line will be written to the file for each channel epoch and will
 # contain:
-# "net,sta,loc,chan,lat,lon,elev,depth,azimuth,SACdip,instrument,scale,scalefreq,scaleunits,samplerate,start,end"
+# "net|sta|loc|chan|lat|lon|elev|depth|azimuth|dip|instrument|scale|scalefreq|scaleunits|samplerate|start|end"
 #
-# The dip field in this output will be converted from the SEED to SAC
-# convention by adding 90.  This metadata file can be used directly
-# with mseed2sac or tracedsp to create SAC files including basic
-# metadata.
+# This metadata file can be used directly with mseed2sac or tracedsp
+# to create SAC files including basic metadata.
 #
 # SAC P&Zs: If the -sd option is given SAC Poles and Zeros will be
 # fetched and a file for each channel will be written to the specified
@@ -102,14 +100,16 @@
 #  are migrated to service.iris.edu.
 #
 # 2013.074:
-#  - Add work around for bug in Perl's Digest Authorization headers.
+#  - Add work around for bug in Perl's Digest Authorization headers
+#  that conflicts with pedantic behavior of Apache Tomcat, eventually
+#  Tomcat will be more lenient and this fix will be removed.
+#
+# 2013.077:
+#  - Convert metadata output line to be bar (|) separated instead of
+#  comma separated and leave dip in SEED convention.
+#  - Do not translate commas to semicolons in instrument name in metadata.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
-
-#CHAD:
-#  - RESP and SACPZ may not take wildcards, force metadata expansion when used?
-#
-#  - RESP doesn't seem to work as expected
 
 use strict;
 use File::Basename;
@@ -133,13 +133,13 @@ $servicebase = $ENV{'SERVICEBASE'} if ( exists $ENV{'SERVICEBASE'} );
 my $timeseriesservice = "$servicebase/fdsnws/dataselect/1";
 
 # Check for environment variable override for timeseriesservice
-$timeseriesservice = $ENV{'TIMESERIESSERVICE'} if ( exists $ENV{'TIMESERIESSERVICE'} );
+$timeseriesservice = $ENV{'TIMESERIESWS'} if ( exists $ENV{'TIMESERIESWS'} );
 
 # Default web service for metadata
 my $metadataservice = "$servicebase/fdsnws/station/1";
 
 # Check for environment variable override for metadataservice
-$metadataservice = $ENV{'METADATASERVICE'} if ( exists $ENV{'METADATASERVICE'} );
+$metadataservice = $ENV{'METADATAWS'} if ( exists $ENV{'METADATAWS'} );
 
 # Web service for SAC P&Z
 my $sacpzservice = "$servicebase/irisws/sacpz/1";
@@ -147,15 +147,15 @@ my $sacpzservice = "$servicebase/irisws/sacpz/1";
 my $sacpzservice = "http://www.iris.edu/ws/sacpz";
 
 # Check for environment variable override for sacpzservice
-$sacpzservice = $ENV{'SACPZSERVICE'} if ( exists $ENV{'SACPZSERVICE'} );
+$sacpzservice = $ENV{'SACPZWS'} if ( exists $ENV{'SACPZWS'} );
 
 # Web service for RESP
 my $respservice = "$servicebase/irisws/resp/1";
 # Until this service is migrated here is an override
-my $sacpzservice = "http://www.iris.edu/ws/resp";
+my $respservice = "http://www.iris.edu/ws/resp";
 
 # Check for environment variable override for respservice
-$respservice = $ENV{'RESPSERVICE'} if ( exists $ENV{'RESPSERVICE'} );
+$respservice = $ENV{'RESPWS'} if ( exists $ENV{'RESPWS'} );
 
 # HTTP UserAgent reported to web services
 my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
@@ -214,8 +214,8 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
 			      'sacpzdir|sd=s'  => \$sacpzdir,
 			      'respdir|rd=s'   => \$respdir,
 			      'metafile|m=s'   => \$metafile,
-			      'msurl=s'        => \$metadataservice,
 			      'tsurl=s'        => \$timeseriesservice,
+			      'msurl=s'        => \$metadataservice,
 			      'sacpzurl=s'     => \$sacpzservice,
 			      'respurl=s'      => \$respservice,
 			    );
@@ -227,8 +227,8 @@ my $required =  ( defined $net || defined $sta ||
 		  defined $selectfile || defined $bfastfile );
 
 if ( ! $getoptsret || $usage || ! $required ) {
-  print "$scriptname: collect waveform data from the IRIS DMC (version $version)\n";
-  print "http://www.iris.edu/ws/wsclients/\n\n";
+  print "$scriptname: collect time series and related metadata (version $version)\n";
+  print "http://service.iris.edu/clients/\n\n";
   print "Usage: $scriptname [options]\n\n";
   print " Options:\n";
   print " -v                Increase verbosity, may be specified multiple times\n";
@@ -250,7 +250,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -A appname        Application/version string for identification\n";
   print " -a user:pass      User and password for access to restricted data\n";
   print "\n";
-  print " -o outfile        Fetch waveform data and write to output file\n";
+  print " -o outfile        Fetch time series data and write to output file\n";
   print " -sd sacpzdir      Fetch SAC P&Zs and write files to sacpzdir\n";
   print " -rd respdir       Fetch RESP and write files to respdir\n";
   print " -m metafile       Write basic metadata to specified file\n";
@@ -258,7 +258,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   exit 1;
 }
 
-if ( ! $outfile && ! $sacpzdir && ! $respdir && ! $metafile ) {
+if ( ! $outfile && ! $metafile && ! $sacpzdir && ! $respdir ) {
   die "No output options specified, try -h for usage information\n";
 }
 
@@ -276,10 +276,10 @@ if ( $respdir && ! -d "$respdir" ) {
   die "Cannot find RESP output directory: $respdir\n";
 }
 
-# Check for time window if requesting waveform data
+# Check for time window if requesting time series data
 if ( $outfile && ( ! defined $selectfile && ! defined $bfastfile &&
 		   ( ! defined $starttime || ! defined $endtime ) ) ) {
-  die "Cannot request waveform data without start and end times\n";
+  die "Cannot request time series data without start and end times\n";
 }
 
 # Normalize time strings given on the command line
@@ -375,7 +375,8 @@ my $metadataxml;
 # Fetch metadata from the station web service if metadata output file has been
 # specified or if geographic range selection is requested.
 # This processing will populate the request hash with entries matching metadata
-if ( $metafile || scalar @latrange || scalar @lonrange || scalar @degrange ) {
+if ( $metafile || $sacpzdir || $respdir
+     || scalar @latrange || scalar @lonrange || scalar @degrange ) {
   foreach my $selection ( @selections ) {
     my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
     &FetchMetaData($snet,$ssta,$sloc,$schan,$sstart,$send);
@@ -407,8 +408,8 @@ if ( $verbose > 2 ) {
 # Track bytes downloaded in callback handlers
 my $datasize = 0;
 
-# Fetch waveform data if output file specified
-&FetchWaveformData() if ( $outfile );
+# Fetch time series data if output file specified
+&FetchTimeSeriesData() if ( $outfile );
 
 # Collect SAC P&Zs if output directory specified
 &FetchSACPZ() if ( $sacpzdir );
@@ -427,19 +428,16 @@ if ( $metafile ) {
     open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
 
     # Print header line
-    print META "#net,sta,loc,chan,lat,lon,elev,depth,azimuth,SACdip,instrument,scale,scalefreq,scaleunits,samplerate,start,end\n";
+    print META "#net|sta|loc|chan|lat|lon|elev|depth|azimuth|dip|instrument|scale|scalefreq|scaleunits|samplerate|start|end\n";
 
     foreach my $channel ( sort @metadata ) {
       my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) =
 	split (/,/, $channel);
 
-      # Convert inclination/dip to SAC convention
-      $dip += 90;
-
       $sensfreq = sprintf ("%0g", $sensfreq);
       $samplerate = sprintf ("%0g", $samplerate);
 
-      print META "$net,$sta,$loc,$chan,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$sens,$sensfreq,$sensunit,$samplerate,$start,$end\n";
+      print META "$net|$sta|$loc|$chan|$lat|$lon|$elev|$depth|$azimuth|$dip|$instrument|$sens|$sensfreq|$sensunit|$samplerate|$start|$end\n";
     }
 
     close META;
@@ -631,9 +629,9 @@ sub ReadBFastFile {
 
 
 ######################################################################
-# FetchWaveformData:
+# FetchTimeSeriesData:
 #
-# Collect waveform data for each entry in the %request hash.  All
+# Collect time series data for each entry in the %request hash.  All
 # returned data is written to the global output file (outfile).
 #
 # The request list is separatated into groups where the group size is
@@ -641,7 +639,7 @@ sub ReadBFastFile {
  # it will be retried, after too many failures.
 #
 ######################################################################
-sub FetchWaveformData {
+sub FetchTimeSeriesData {
   # Open output file
   open (OUT, ">$outfile") || die "Cannot open output file '$outfile': $!\n";
 
@@ -693,7 +691,7 @@ sub FetchWaveformData {
     return;
   }
 
-  print STDERR "Fetching waveform data ($count selections)\n" if ( $verbose );
+  print STDERR "Fetching time series data ($count selections)\n" if ( $verbose );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
@@ -717,14 +715,14 @@ sub FetchWaveformData {
       $postdata .= "$req\n";
     }
 
-    print STDERR "Waveform URI: '$uri'\n" if ( $verbose > 1 );
+    print STDERR "Time series URI: '$uri'\n" if ( $verbose > 1 );
     print STDERR "Data selection (POST):\n$postdata" if ( $verbose > 1 );
 
-    print STDERR "Downloading waveform data (group $groupnum of $groupcnt) :: " if ( $verbose );
+    print STDERR "Downloading time series data (group $groupnum of $groupcnt) :: " if ( $verbose );
 
     $datasize = 0;
 
-    # Fetch waveform data from web service using callback routine
+    # Fetch time series data from web service using callback routine
     my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack );
 
     if ( $response->code == 204 ) {
@@ -770,12 +768,12 @@ sub FetchWaveformData {
 
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $totalbytes/(($duration)?$duration:0.000001);
-  printf (STDERR "Received %s of waveform data in %.1f seconds (%s/s)\n",
+  printf (STDERR "Received %s of time series data in %.1f seconds (%s/s)\n",
 	  sizestring($totalbytes), $duration, sizestring($rate));
 
   # Remove empty file
   unlink $outfile if ( -z $outfile );
-} # End of FetchWaveformData
+} # End of FetchTimeSeriesData
 
 
 ######################################################################
@@ -1179,9 +1177,6 @@ sub FetchMetaData {
 
       # Translate metadata location ID to "--" if it's spaces
       my $dloc = ( $loc eq "  " ) ? "--" : $loc;
-
-      # Translate commas in metadata instrument name to semi-colons
-      $instrument =~ s/,/;/g;
 
       # Remove newlines, returns and trailing spaces in metadata instrument name
       $instrument =~ s/[\n\r]//g;
