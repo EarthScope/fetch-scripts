@@ -209,13 +209,12 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " --magtype type    Specify a magnitude type for magnitude range limits\n";
   print " --cat name        Limit to origins from specific catalog (e.g. ISC, PDE, GCMT)\n";
   print " --con name        Limit to origins from specific contributor (e.g. ISC, NEIC)\n";
-  print " --ua date         Limit to origins updated after date (YYYY-MM-DD)\n";
+  print " --ua date         Limit to origins updated after date (YYYY-MM-DD,HH:MM:SS)\n";
   print "\n";
 #  print " --altform         Print output in an alternate form, default is more parsable\n";
 #  print " --limit max:off   Limit to max events, optionally starting at offset\n";
   print " --allorigins      Return all origins, default is only primary origin per event\n";
   print " --allmags         Return all magnitudes, default is only primary magnitude per event\n";
-#  print " --secondary       Return secondary origins, default is only primary origins\n";
   print " --orderbymag      Order results by magnitude instead of time\n";
   print "\n";
   print " --evid id         Select a specific event by DMC event ID\n";
