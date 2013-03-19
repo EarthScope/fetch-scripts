@@ -2,9 +2,14 @@
 #
 # FetchEvent
 #
-# Find the most current version at http://www.iris.edu/ws/wsclients/
+# Find the most current version at http://service.iris.edu/clients/
 #
-# Fetch event parameters from the DMC web interfaces.
+# Fetch event parameters from web services.  The default web service
+# are from the IRIS DMC, other FDSN web services may be specified by
+# setting the following environment variables:
+#
+# SERVICEBASE = the base URI of the service(s) to use (http://service.iris.edu/)
+# EVENTWS = complete URI of service (http://service.iris.edu/fdsnws/event/1)
 #
 # Dependencies: This script should run without problems on Perl
 # release 5.10 or newer, older versions of Perl might require the
@@ -81,6 +86,13 @@
 # 2012.221
 #  - Add limit argument that takes limit:offset (undocumented, for now)
 #
+# 2013.077
+#  - Use the LWP::UserAgent method env_proxy() to check for and use connection
+#  proxy information from environment variables (e.g. http_proxy).
+#  - Add checking of environment variables that will override the web
+#  service base path (i.e. host name).
+#  - Change updated after to take full resolution date and time.
+#
 # Author: Chad Trabant, IRIS Data Managment Center
 
 use strict;
@@ -91,12 +103,21 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2012.221";
+my $version = "2013.077";
 
 my $scriptname = basename($0);
 
-# Web service for metadata
-my $eventservice = 'http://www.iris.edu/ws/event';
+# Default web service base
+my $servicebase = 'http://service.iris.edu';
+
+# Check for environment variable overrides for servicebase
+$servicebase = $ENV{'SERVICEBASE'} if ( exists $ENV{'SERVICEBASE'} );
+
+# Web service for events
+my $eventservice = "$servicebase/fdsnws/event/1";
+
+# Check for environment variable override for timeseriesservice
+$eventservice = $ENV{'EVENTWS'} if ( exists $ENV{'EVENTWS'} );
 
 # HTTP UserAgent reported to web services
 my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
@@ -120,7 +141,6 @@ my $altform      = undef;
 my @limitrange   = ();      # (limit:offset)
 my $allorigins   = undef;
 my $allmags      = undef;
-my $secondary    = undef;
 my $orderbymag   = undef;
 
 my $eventid      = undef;
@@ -153,7 +173,6 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
 			      'limit=s'           => \@limitrange,
                               'allorigins'        => \$allorigins,
                               'allmags'           => \$allmags,
-                              'secondary'         => \$secondary,
 			      'orderbymag'        => \$orderbymag,
 
 			      'eventid|evid=s'    => \$eventid,
@@ -173,8 +192,8 @@ my $required =  ( defined $starttime || defined $endtime ||
                   defined $eventid || defined $originid );
 
 if ( ! $getoptsret || $usage || ! $required ) {
-  print "$scriptname: collect event information from the IRIS DMC ($version)\n";
-  print "http://www.iris.edu/ws/wsclients/\n\n";
+  print "$scriptname: collect event information ($version)\n";
+  print "http://service.iris.edu/clients/\n\n";
   print "Usage: $scriptname [options]\n\n";
   print " Options:\n";
   print " -v                More verbosity, may be specified multiple times (-vv, -vvv)\n";
@@ -230,8 +249,9 @@ if ( $endtime ) {
 }
 
 if ( $updatedafter ) {
-  my ($year,$month,$mday) = split (/[-:,.\s\/T]/, $updatedafter);
-  $updatedafter = sprintf ("%04d-%02d-%02d", $year, $month, $mday);
+  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $updatedafter);
+  $updatedafter = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+  $updatedafter .= ".$subsec" if ( $subsec );
 }
 
 # Validate and prepare lat, lon and radius input
@@ -466,6 +486,7 @@ sub FetchEvents {
 
   # Create HTTP user agent
   my $ua = RequestAgent->new();
+  $ua->env_proxy;
 
   # Create web service URI
   my $uri = "${eventservice}/query?";
@@ -502,9 +523,8 @@ sub FetchEvents {
     $uri .= "&limit=$limitrange[0]" if ( $limitrange[0] );
     $uri .= "&offset=$limitrange[1]" if ( $limitrange[1] );
   }
-  $uri .= "&includeallorigins=yes" if ( $allorigins );
-  $uri .= "&includeallmagnitudes=yes" if ( $allmags );
-  $uri .= "&preferredonly=no" if ( $secondary );
+  $uri .= "&includeallorigins=true" if ( $allorigins );
+  $uri .= "&includeallmagnitudes=true" if ( $allmags );
 
   $uri .= "&eventid=$eventid" if ( $eventid );
   $uri .= "&originid=$originid" if ( $originid );
