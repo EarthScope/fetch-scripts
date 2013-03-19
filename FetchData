@@ -108,7 +108,7 @@
 #  comma separated and leave dip in SEED convention.
 #  - Do not translate commas to semicolons in instrument name in metadata.
 #
-# Author: Chad Trabant, IRIS Data Managment Center
+# Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
 use File::Basename;

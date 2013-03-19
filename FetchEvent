@@ -93,7 +93,7 @@
 #  service base path (i.e. host name).
 #  - Change updated after to take full resolution date and time.
 #
-# Author: Chad Trabant, IRIS Data Managment Center
+# Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
 use File::Basename;
