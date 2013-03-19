@@ -431,7 +431,7 @@ if ( $metafile ) {
 
     foreach my $channel ( sort @metadata ) {
       my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) =
-	split (/,/, $channel);
+	split (/\|/, $channel);
 
       $sensfreq = sprintf ("%0g", $sensfreq);
       $samplerate = sprintf ("%0g", $samplerate);
@@ -972,7 +972,7 @@ sub DLCallBack {
 #
 # Resulting metadata is placed in the global @metadata array with each
 # entry taking the following form:
-#   "net,sta,loc,chan,start,end,lat,lon,elev,depth,azimuth,dip,instrument,samplerate,sensitivity,sensfreq,sensunits"
+#   "net|sta|loc|chan|start|end|lat|lon|elev|depth|azimuth|dip|instrument|samplerate|sensitivity|sensfreq|sensunits"
 #
 # In addition, an entry for the unique NSLCQ time-window is added to
 # the %request hash, used later to request data.  The value of the
@@ -1188,7 +1188,7 @@ sub FetchMetaData {
       my $mend = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
 
       # Push channel epoch metadata into storage array
-      push (@metadata, "$net,$sta,$dloc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit");
+      push (@metadata, "$net|$sta|$dloc|$chan|$start|$end|$lat|$lon|$elev|$depth|$azimuth|$dip|$instrument|$samplerate|$sens|$sensfreq|$sensunit");
 
       # Put entry into request hash, value is the widest range of channel epochs
       if ( ! exists  $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} ) {
