@@ -108,6 +108,10 @@
 #  comma separated and leave dip in SEED convention.
 #  - Do not translate commas to semicolons in instrument name in metadata.
 #
+# 2013.086
+#  - Remove code to filter Authorization headers, Apache Tomcat has been fixed
+#  to accept Digest Authentication credentials as submitted by libwww/LWP.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -118,7 +122,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.077";
+my $version = "2013.086";
 
 my $scriptname = basename($0);
 
@@ -645,9 +649,6 @@ sub FetchTimeSeriesData {
   # Create HTTP user agent
   my $ua = RequestAgent->new();
   $ua->env_proxy;
-
-  # Add hook to filter Authorization headers for RFC2617 conformance
-  $ua->add_handler(request_send => \&RequestSendAuthFilter);
 
   my $count = 0;
 
@@ -1305,38 +1306,6 @@ sub sizestring { # sizestring (bytes)
     return "";
   }
 } # End of sizestring()
-
-
-######################################################################
-# RequestSendAuthFilter (request, ua, h):
-#
-# This routine is expected to be registered as handler for the
-# 'request_send' callback from UserAgent.
-#
-# Rewrite the Authorization header for a HTTP::Request object to
-# remove quotes from the values for the 'qop' and 'nc' fields.  This
-# is required for conformance to RFC2617 and some versions of Perl's
-# libwww (LWP) incorrectly quotes these values.
-######################################################################
-sub RequestSendAuthFilter {
-  my $req = shift;
-
-  if ( $req->header('Authorization') ) {
-    my $authheader = $req->header('Authorization');
-
-    # Extract qop and nc values without quotes
-    my ($qopvalue) = $authheader =~ /qop="(.+?)"/;
-    my ($ncvalue) = $authheader =~ /nc="(.+?)"/;
-
-    # Replace quoted with non-quoted values and reset the Authorization header value
-    $authheader =~ s/qop="(.+?)"/qop=$qopvalue/;
-    $authheader =~ s/nc="(.+?)"/nc=$ncvalue/;
-
-    $req->header('Authorization' => $authheader);
-  }
-
-  return;
-}
 
 
 ######################################################################
