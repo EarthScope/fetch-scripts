@@ -112,6 +112,10 @@
 #  - Remove code to filter Authorization headers, Apache Tomcat has been fixed
 #  to accept Digest Authentication credentials as submitted by libwww/LWP.
 #
+# 2013.118
+#  - Fix parsing of start and end times from metadata that are used when no
+#  start and/or end is specified by the caller.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -122,7 +126,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.086";
+my $version = "2013.118";
 
 my $scriptname = basename($0);
 
@@ -1183,10 +1187,10 @@ sub FetchMetaData {
       $instrument =~ s/\s*$//g;
 
       # Cleanup start and end strings, with truncation to 2038-01-01T00:00:00 for older Perls
-      my ($y,$mo,$d,$h,$m,$s) = $start =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
+      my ($y,$mo,$d,$h,$m,$s) = $start =~ /^(\d{4,4})[-\/,:](\d{1,2})[-\/,:](\d{1,2})[-\/,:T](\d{1,2})[-\/,:](\d{1,2})[-\/,:](\d{1,2}).*/;
       my $mstart = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
-      my ($y,$mo,$d,$h,$m,$s) = $end =~ /^(\d{4,4}[-\/,:]\d{1,2}[-\/,:]\d{1,2}[-\/,:T]\d{1,2}[-\/,:]\d{1,2}[-\/,:]\d{1,2}).*/;
-      my $mend = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
+      my ($y,$mo,$d,$h,$m,$s) = $end   =~ /^(\d{4,4})[-\/,:](\d{1,2})[-\/,:](\d{1,2})[-\/,:T](\d{1,2})[-\/,:](\d{1,2})[-\/,:](\d{1,2}).*/;
+      my $mend =   ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
 
       # Push channel epoch metadata into storage array
       push (@metadata, "$net|$sta|$dloc|$chan|$start|$end|$lat|$lon|$elev|$depth|$azimuth|$dip|$instrument|$samplerate|$sens|$sensfreq|$sensunit");
