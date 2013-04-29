@@ -26,8 +26,8 @@
 # The default "parsable" output includes fields separated by vertical
 # bars (|) and follows this pattern:
 #
-# EventID|OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor,ContribEventID|MagType,MagValue,MagAuthor|MagType,MagValue,MagAuthor|...|EventLocationName
-#         OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor,ContribEventID
+# EventID|OriginTime|Latitude|Longitude|Depth/km|Author|Catalog|Contributor,ContribEventID|MagType,MagValue,MagAuthor|MagType,MagValue,MagAuthor|...|EventLocationName
+#         OriginTime|Latitude|Longitude|Depth/km|Author|Catalog|Contributor,ContribEventID
 #
 # The event ID and the primary origin details are all contained on a single
 # line along with all magnitude estimates associated with the event.
@@ -93,6 +93,13 @@
 #  service base path (i.e. host name).
 #  - Change updated after to take full resolution date and time.
 #
+# 2013.119
+#  - Fix parsing of event, origin & magnitude IDs to make them case insensitive,
+#  recent changes in the service changed the case and broke the script.
+#  - The event service now returns depths in meters, convert these meters to
+#  kilometers to match the previous output and common convention.
+#  - Fix positioning of number fields that have no decimal point.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -103,7 +110,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.077";
+my $version = "2013.119";
 
 my $scriptname = basename($0);
 
@@ -357,8 +364,8 @@ open (EVENT, ">$eventfile") || die "Cannot open event file '$eventfile': $!\n";
 # Write event information to stdout/console or a file if specified
 if ( ! defined $altform ) {
   # Parsable lines, one event line with primary origin, fields delimited with '|':
-  # EventID|OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor,ContribEventID|MagType,MagValue,MagAuthor|MagType,MagValue,MagAuthor|...|EventLocationName
-  #         OriginTime|Latitude|Longitude|Depth|Author|Catalog|Contributor,ContribEventID
+  # EventID|OriginTime|Latitude|Longitude|Depth/km|Author|Catalog|Contributor,ContribEventID|MagType,MagValue,MagAuthor|MagType,MagValue,MagAuthor|...|EventLocationName
+  #         OriginTime|Latitude|Longitude|Depth/km|Author|Catalog|Contributor,ContribEventID
 
   foreach my $eventid ( @eventids ) {
     $totalevents++;
@@ -406,8 +413,8 @@ if ( ! defined $altform ) {
 else {
   # Alternate lines, primary origin is first:
   # EVENT <event location name> eventid=<eventid>
-  #   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor> originid=<originid>
-  #   ORIGIN <origintime>,<lat>,<lon>,<depth>,<author>,<catalog>,<contributor> originid=<originid>
+  #   ORIGIN <origintime>,<lat>,<lon>,<depthkm>,<author>,<catalog>,<contributor> originid=<originid>
+  #   ORIGIN <origintime>,<lat>,<lon>,<depthkm>,<author>,<catalog>,<contributor> originid=<originid>
   #   MAGNITUDE <magtype>,<magvalue>,<author> magnitudeid=<magnitudeid>
   #   MAGNITUDE <magtype>,<magvalue>,<author> magnitudeid=<magnitudeid>
 
@@ -462,7 +469,10 @@ printf STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mda
 ######################################################################
 sub decimalposition { # decimalposition (value, position)
   my ($value, $position) = @_;
+
   my $idx = index ($value, '.');
+  $idx = 0 if ( $idx < 0 );
+
   return sprintf "%*s$value", ($position - $idx);
 }  # End of decimalposition()
 
@@ -644,7 +654,7 @@ sub FetchEvents {
       ($magnitudeid,$mag,$magtype,$magauthor) = (undef) x 4;
 
       my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
-      ($eventid) = $publicid =~ /.*eventId\=(\d+)$/;
+      ($eventid) = $publicid =~ /.*eventid\=(\d+)$/i;
 
       $inevent = 1;
     }
@@ -658,7 +668,7 @@ sub FetchEvents {
 
       if ( $element->{Name} eq "origin" ) {
 	my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
-	($originid) = $publicid =~ /.*originId\=(\d+)$/;
+	($originid) = $publicid =~ /.*originid\=(\d+)$/i;
 
 	# Search for catalog and contributor from any namespace
 	foreach my $key (keys %{$element->{Attributes}}) {
@@ -672,7 +682,7 @@ sub FetchEvents {
 
       if ( $element->{Name} eq "magnitude" ) {
 	my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
-	($magnitudeid) = $publicid =~ /.*magnitudeId\=(\d+)$/;
+	($magnitudeid) = $publicid =~ /.*magnitudeid\=(\d+)$/i;
 
 	$inmagnitude = 1;
       }
@@ -781,7 +791,10 @@ sub FetchEvents {
 	if ( $intime && $invalue ) { $time .= $element->{Data}; }
 	elsif ($inlat && $invalue ) { $lat .= $element->{Data}; }
 	elsif ($inlon && $invalue ) { $lon .= $element->{Data}; }
-	elsif ($indepth && $invalue ) { $depth .= $element->{Data}; }
+	elsif ($indepth && $invalue ) {
+	   # Convert QuakeML depth in meters to kilometers
+	  $depth .= $element->{Data} / 1000.0;
+	}
 	elsif ($increationInfo && $inauthor ) { $author .= $element->{Data}; }
       }
 
