@@ -98,7 +98,8 @@
 #  recent changes in the service changed the case and broke the script.
 #  - The event service now returns depths in meters, convert these meters to
 #  kilometers to match the previous output and common convention.
-#  - Fix positioning of number fields that have no decimal point.
+#  - Fix positioning of number fields that have no decimal point and adjust widths
+#  of fields for expected sizes.
 #
 # Author: Chad Trabant, IRIS Data Management Center
 
@@ -382,8 +383,8 @@ if ( ! defined $altform ) {
 
     # Print first/primary origin
     my ($time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = @{$origins{$eventid}{$originids[0]}};
-    printf (EVENT "|%-24s|%-11s|%-10s|%-7s|%s|%s|%s%s",
-	    $time,&decimalposition($lat,3),&decimalposition($lon,4),&decimalposition($depth,5),
+    printf (EVENT "|%-24s|%-8s|%-9s|%-6s|%s|%s|%s%s",
+	    $time,&decimalposition($lat,4),&decimalposition($lon,5),&decimalposition($depth,5),
 	    $author,$catalog,$contributor,($contributoreventid)?",$contributoreventid":"");
 
     # Generate list of magnitude IDs with primary magnitude first and others sorted on ascending value
@@ -404,8 +405,8 @@ if ( ! defined $altform ) {
     # Print secondary origin lines
     foreach my $originid ( @originids[1..$#originids] ) {
       my ($time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = @{$origins{$eventid}{$originid}};
-      printf (EVENT "         %-24s|%-11s|%-10s|%-7s|%s|%s|%s%s\n",
-	      $time,&decimalposition($lat,3),&decimalposition($lon,4),&decimalposition($depth,5),
+      printf (EVENT "         %-24s|%-8s|%-9s|%-6s|%s|%s|%s%s\n",
+	      $time,&decimalposition($lat,4),&decimalposition($lon,5),&decimalposition($depth,5),
 	      $author,$catalog,$contributor,($contributoreventid)?",$contributoreventid":"");
     }
   }
@@ -464,16 +465,20 @@ printf STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mda
 
 ######################################################################
 # decimalposition:
-# Return a string padded with spaces such that the decimal is at the
-# specified position in the string.
+#
+# Return a string left-padded with spaces such that the decimal is at
+# the specified position in the string.
 ######################################################################
 sub decimalposition { # decimalposition (value, position)
   my ($value, $position) = @_;
 
   my $idx = index ($value, '.');
-  $idx = 0 if ( $idx < 0 );
+  my $len = length $value;
 
-  return sprintf "%*s$value", ($position - $idx);
+  $idx = $len if ( $idx < 0 );
+
+  return sprintf "%*s", ($position - $idx - 1 + $len), $value;
+
 }  # End of decimalposition()
 
 
