@@ -104,6 +104,7 @@
 # 2013.123
 #  - Attempt to parse event, origin and magnitude IDs from patterns other than
 #  the one used by the IRIS services.
+#  - Check for no origins for an event and print appropriate message on output.
 #
 # Author: Chad Trabant, IRIS Data Management Center
 
@@ -384,6 +385,11 @@ if ( ! defined $altform ) {
       push (@originids, $originid) if ( $originid != $eventprime{$eventid} );
     }
     $totalorigins += scalar @originids;
+
+    if ( scalar @originids <= 0 ) {
+      print EVENT " -- NO ORIGINS\n";
+      next;
+    }
 
     # Print first/primary origin
     my ($time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = @{$origins{$eventid}{$originids[0]}};
