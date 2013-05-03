@@ -101,6 +101,10 @@
 #  - Fix positioning of number fields that have no decimal point and adjust widths
 #  of fields for expected sizes.
 #
+# 2013.123
+#  - Attempt to parse event, origin and magnitude IDs from patterns other than
+#  the one used by the IRIS services.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -111,7 +115,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.119";
+my $version = "2013.123";
 
 my $scriptname = basename($0);
 
@@ -659,7 +663,15 @@ sub FetchEvents {
       ($magnitudeid,$mag,$magtype,$magauthor) = (undef) x 4;
 
       my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
-      ($eventid) = $publicid =~ /.*eventid\=(\d+)$/i;
+      if ( $publicid =~ /.*eventid\=\d+$/ ) { # Check for eventid=ID
+	($eventid) = $publicid =~ /.*eventid\=(\d+)$/i;
+      }
+      elsif ( $publicid =~ /.*\/[^\/:]+$/ ) { # Check for ID following last slash
+	($eventid) = $publicid =~ /.*\/([^\/:]+)$/i;
+      }
+      else { # Fall back to simply using the full public ID
+	$eventid = $publicid;
+      }
 
       $inevent = 1;
     }
@@ -673,7 +685,15 @@ sub FetchEvents {
 
       if ( $element->{Name} eq "origin" ) {
 	my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
-	($originid) = $publicid =~ /.*originid\=(\d+)$/i;
+	if ( $publicid =~ /.*originid\=\d+$/ ) { # Check for originid=ID
+	  ($originid) = $publicid =~ /.*originid\=(\d+)$/i;
+	}
+	elsif ( $publicid =~ /.*\/[^\/:]+$/ ) { # Check for ID following last slash
+	  ($originid) = $publicid =~ /.*\/([^\/:]+)$/i;
+	}
+	else { # Fall back to simply using the full public ID
+	  $originid = $publicid;
+	}
 
 	# Search for catalog and contributor from any namespace
 	foreach my $key (keys %{$element->{Attributes}}) {
@@ -687,7 +707,15 @@ sub FetchEvents {
 
       if ( $element->{Name} eq "magnitude" ) {
 	my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
-	($magnitudeid) = $publicid =~ /.*magnitudeid\=(\d+)$/i;
+	if ( $publicid =~ /.*magnitudeid\=\d+$/ ) { # Check for magnitudeid=ID
+	  ($magnitudeid) = $publicid =~ /.*magnitudeid\=(\d+)$/i;
+	}
+	elsif ( $publicid =~ /.*\/[^\/:]+$/ ) { # Check for ID following last slash
+	  ($magnitudeid) = $publicid =~ /.*\/([^\/:]+)$/i;
+	}
+	else { # Fall back to simply using the full public ID
+	  $magnitudeid = $publicid;
+	}
 
 	$inmagnitude = 1;
       }
