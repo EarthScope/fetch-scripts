@@ -116,6 +116,10 @@
 #  - Fix parsing of start and end times from metadata that are used when no
 #  start and/or end is specified by the caller.
 #
+# 2013.150
+#  - Allow dash characters in breqfast formatted requests for the network
+#  fields to support virtual networks that use dashes.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -126,7 +130,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.118";
+my $version = "2013.150";
 
 my $scriptname = basename($0);
 
@@ -534,7 +538,7 @@ sub ReadBFastFile {
       print "Unrecognized station code: '$sta', skipping line $linecount\n" if ( $verbose );
       next;
     }
-    if ( $net !~ /^[_A-Za-z0-9*?]+$/ ) {
+    if ( $net !~ /^[-_A-Za-z0-9*?]+$/ ) {
       print "Unrecognized network code: '$net', skipping line $linecount\n" if ( $verbose );
       next;
     }
