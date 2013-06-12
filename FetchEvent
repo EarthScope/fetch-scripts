@@ -106,6 +106,15 @@
 #  the one used by the IRIS services.
 #  - Check for no origins for an event and print appropriate message on output.
 #
+# 2013.154
+#  - Change (unadvertised) option -eventurl to -eventws to match env. variable.
+#
+# 2013.162
+#  - Parse and store complete publicID for event, origin and magnitude IDs.
+#  Add a function to attempt to parse shorter IDs from full public IDs for
+#  printing.  This makes the script compatible for services that do not follow
+#  the IRIS publicID convention.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -116,7 +125,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.123";
+my $version = "2013.162";
 
 my $scriptname = basename($0);
 
@@ -195,7 +204,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
 			      'auth|a=s'          => \$auth,
 			      'outfile|o=s'       => \$outfile,
 			      'xmlfile|X=s'       => \$xmlfile,
-			      'eventurl=s'        => \$eventservice,
+			      'eventws=s'         => \$eventservice,
 			    );
 
 my $required =  ( defined $starttime || defined $endtime ||
@@ -376,8 +385,9 @@ if ( ! defined $altform ) {
   foreach my $eventid ( @eventids ) {
     $totalevents++;
 
-    # Print IRIS event ID
-    printf EVENT "%-8s", $eventid;
+    # Print event ID
+    my $printeventid = &ExtractID($eventid, "eventid");
+    printf EVENT "%-8s", $printeventid;
 
     # Generate list of origin IDs with primary origin first and others sorted on ascending time
     my @originids = (exists $origins{$eventid}{$eventprime{$eventid}}) ? ($eventprime{$eventid}) : ();
@@ -406,7 +416,9 @@ if ( ! defined $altform ) {
 
     # Print magnitudes
     foreach my $magid ( @magids ) {
-      print EVENT "|" . join (',', @{$mags{$eventid}{$magid}});
+      my $magstr = join (',', @{$mags{$eventid}{$magid}});
+      $magstr =~ s/,*$//;  # Cut trailing commas
+      print EVENT "|$magstr";
     }
 
     # Print event name and newline
@@ -431,7 +443,10 @@ else {
 
   foreach my $eventid ( @eventids ) {
     $totalevents++;
-    printf EVENT "EVENT $eventname{$eventid} eventid=$eventid\n";
+
+    # Print event ID
+    my $printeventid = &ExtractID($eventid, "eventid");
+    printf EVENT "EVENT $eventname{$eventid} eventid=$printeventid\n";
 
     # Generate list of origin IDs with primary origin firstand others sorted on ascending time
     my @originids = (exists $origins{$eventid}{$eventprime{$eventid}}) ? ($eventprime{$eventid}) : ();
@@ -449,6 +464,7 @@ else {
     foreach my $originid ( @originids ) {
       $totalorigins++;
       my ($time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = @{$origins{$eventid}{$originid}};
+
       printf EVENT "  ORIGIN %s,%s,%s,%s,%s,%s,%s originid=$originid\n",
 	$time,$lat,$lon,$depth,$author,$catalog,$contributor;
     }
@@ -490,6 +506,42 @@ sub decimalposition { # decimalposition (value, position)
   return sprintf "%*s", ($position - $idx - 1 + $len), $value;
 
 }  # End of decimalposition()
+
+
+######################################################################
+# ExtractID:
+#
+# Attempt to extract an ID from a full publicID value.  The smaller ID
+# value is generally better for printing and is normally usable as the
+# value of the eventid service parameter.
+#
+# An IRIS example for <event publicID= >:
+# smi:service.iris.edu/fdsnws/event/1/query?eventid=3954686
+#
+# An NEIC example for <event publicID= >:
+# quakeml://comcat.cr.usgs.gov/fdsnws/event/1/query?eventid=pde20100115001825990_25&amp;format=quakeml
+#
+# A SeisComP3 example for <event publicID= >:
+# smi:scs/0.6/gfz2013hykj
+#
+######################################################################
+sub ExtractID { # ExtractID (publicid, token)
+  my ($publicid, $token) = @_;
+
+  my $id = undef;
+
+  if ( $publicid =~ /.*${token}\=[0-9a-zA-Z]+/i ) { # Check for eventid=ID
+    ($id) = $publicid =~ /.*${token}\=([0-9a-zA-Z]+)/i;
+  }
+  elsif ( $publicid =~ /.*\/[^\/:]+$/ ) { # Check for ID following last slash
+    ($id) = $publicid =~ /.*\/([^\/:]+)$/;
+  }
+  else { # Fall back to simply using the full public ID
+    $id = $publicid;
+  }
+
+  return $id;
+}  # End of ExtractID()
 
 
 ######################################################################
@@ -668,16 +720,7 @@ sub FetchEvents {
       ($name,$eventid,$originid,$porigin,$pmagnitude,$time,$lat,$lon,$depth,$author,$catalog,$contributor,$contributoreventid) = (undef) x 13;
       ($magnitudeid,$mag,$magtype,$magauthor) = (undef) x 4;
 
-      my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
-      if ( $publicid =~ /.*eventid\=\d+$/ ) { # Check for eventid=ID
-	($eventid) = $publicid =~ /.*eventid\=(\d+)$/i;
-      }
-      elsif ( $publicid =~ /.*\/[^\/:]+$/ ) { # Check for ID following last slash
-	($eventid) = $publicid =~ /.*\/([^\/:]+)$/i;
-      }
-      else { # Fall back to simply using the full public ID
-	$eventid = $publicid;
-      }
+      $eventid = $element->{Attributes}->{'{}publicID'}->{Value};
 
       $inevent = 1;
     }
@@ -690,16 +733,7 @@ sub FetchEvents {
       if ( $indescription && $element->{Name} eq "text" ) { $intext = 1; }
 
       if ( $element->{Name} eq "origin" ) {
-	my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
-	if ( $publicid =~ /.*originid\=\d+$/ ) { # Check for originid=ID
-	  ($originid) = $publicid =~ /.*originid\=(\d+)$/i;
-	}
-	elsif ( $publicid =~ /.*\/[^\/:]+$/ ) { # Check for ID following last slash
-	  ($originid) = $publicid =~ /.*\/([^\/:]+)$/i;
-	}
-	else { # Fall back to simply using the full public ID
-	  $originid = $publicid;
-	}
+	$originid = $element->{Attributes}->{'{}publicID'}->{Value};
 
 	# Search for catalog and contributor from any namespace
 	foreach my $key (keys %{$element->{Attributes}}) {
@@ -712,16 +746,7 @@ sub FetchEvents {
       }
 
       if ( $element->{Name} eq "magnitude" ) {
-	my $publicid = $element->{Attributes}->{'{}publicID'}->{Value};
-	if ( $publicid =~ /.*magnitudeid\=\d+$/ ) { # Check for magnitudeid=ID
-	  ($magnitudeid) = $publicid =~ /.*magnitudeid\=(\d+)$/i;
-	}
-	elsif ( $publicid =~ /.*\/[^\/:]+$/ ) { # Check for ID following last slash
-	  ($magnitudeid) = $publicid =~ /.*\/([^\/:]+)$/i;
-	}
-	else { # Fall back to simply using the full public ID
-	  $magnitudeid = $publicid;
-	}
+	$magnitudeid = $element->{Attributes}->{'{}publicID'}->{Value};
 
 	$inmagnitude = 1;
       }
@@ -765,11 +790,9 @@ sub FetchEvents {
 
     if ( $inevent ) {
       if ( $element->{Name} eq "preferredOriginID" ) {
-	($porigin) = $porigin =~ /.*originId\=(\d+)$/; # Trim preferred origin ID to value
 	$inpreferredOriginID = 0;
       }
       elsif ( $element->{Name} eq "preferredMagnitudeID" ) {
-	($pmagnitude) = $pmagnitude =~ /.*magnitudeId\=(\d+)$/; # Trim preferred magnitude ID to value
 	$inpreferredMagnitudeID = 0;
       }
       elsif ( $element->{Name} eq "description" ) { $indescription = 0; }
