@@ -115,6 +115,11 @@
 #  printing.  This makes the script compatible for services that do not follow
 #  the IRIS publicID convention.
 #
+# 2013.176
+#  - Fixed comparisons involving the full public IDs. This had hindered the
+#  functionality of -allorigins and -allmags
+#  --celso
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -392,7 +397,7 @@ if ( ! defined $altform ) {
     # Generate list of origin IDs with primary origin first and others sorted on ascending time
     my @originids = (exists $origins{$eventid}{$eventprime{$eventid}}) ? ($eventprime{$eventid}) : ();
     foreach my $originid ( sort { ${$origins{$eventid}{$b}}[0] cmp ${$origins{$eventid}{$a}}[0] } keys %{$origins{$eventid}} ) {
-      push (@originids, $originid) if ( $originid != $eventprime{$eventid} );
+      push (@originids, $originid) if ( $originid ne $eventprime{$eventid} );
     }
     $totalorigins += scalar @originids;
 
@@ -410,7 +415,7 @@ if ( ! defined $altform ) {
     # Generate list of magnitude IDs with primary magnitude first and others sorted on ascending value
     my @magids = (exists $mags{$eventid}{$eventprimemag{$eventid}}) ? ($eventprimemag{$eventid}) : ();
     foreach my $magid ( sort { ${$mags{$eventid}{$b}}[1] cmp ${$mags{$eventid}{$a}}[1] } keys %{$mags{$eventid}} ) {
-      push (@magids, $magid) if ( $magid != $eventprimemag{$eventid} );
+      push (@magids, $magid) if ( $magid ne $eventprimemag{$eventid} );
     }
     $totalmags += scalar @magids;
 
@@ -451,13 +456,13 @@ else {
     # Generate list of origin IDs with primary origin firstand others sorted on ascending time
     my @originids = (exists $origins{$eventid}{$eventprime{$eventid}}) ? ($eventprime{$eventid}) : ();
     foreach my $originid ( sort { ${$origins{$eventid}{$b}}[0] cmp ${$origins{$eventid}{$a}}[0] } keys %{$origins{$eventid}} ) {
-      push (@originids, $originid) if ( $originid != $eventprime{$eventid} );
+      push (@originids, $originid) if ( $originid ne $eventprime{$eventid} );
     }
 
     # Generate list of magnitude IDs with primary magnitude first and others sorted on ascending value
     my @magids = (exists $mags{$eventid}{$eventprimemag{$eventid}}) ? ($eventprimemag{$eventid}) : ();
     foreach my $magid ( sort { ${$mags{$eventid}{$b}}[1] cmp ${$mags{$eventid}{$a}}[1] } keys %{$mags{$eventid}} ) {
-      push (@magids, $magid) if ( $magid != $eventprimemag{$eventid} );
+      push (@magids, $magid) if ( $magid ne $eventprimemag{$eventid} );
     }
 
     # Print origin lines
