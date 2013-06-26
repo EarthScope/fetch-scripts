@@ -130,7 +130,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.162";
+my $version = "2013.176";
 
 my $scriptname = basename($0);
 
