@@ -1,0 +1,645 @@
+#!/usr/bin/perl
+#
+# FetchEventData
+#
+# Find the most current version at http://www.iris.edu/ws/wsclients/
+#
+# Fetch event parameters from the DMC web interfaces.
+#
+# Dependencies: This script should run without problems on Perl
+# release 5.10 or newer, older versions of Perl might require the
+# installation of the following modules (and their dependencies):
+#   Bundle::LWP (libwww-perl)
+#
+
+#
+# ## Change history ##
+#
+# 2012.309:
+#  - Initial version.
+#
+# Author: Chad Trabant, IRIS Data Managment Center
+
+use strict;
+use File::Basename;
+use Getopt::Long;
+use LWP::UserAgent;
+use HTTP::Status qw(status_message);
+use HTTP::Date;
+use Time::HiRes;
+
+my $version = "2012.309";
+
+my $scriptname = basename($0);
+
+# Web service for event information
+my $eventservice = 'http://www.iris.edu/ws/event';
+
+# Web service for station metadata
+my $metadataservice = 'http://www.iris.edu/ws/station';
+
+# Web service for bulk waveform data
+my $waveformservice = 'http://www.iris.edu/ws/bulkdataselect';
+
+# Web service for travel time calculations
+my $traveltimeservice = 'http://www.iris.edu/ws/traveltime';
+
+# HTTP UserAgent reported to web services
+my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
+
+my $usage      = undef;
+my $verbose    = undef;
+my $nobsprint  = undef;
+my $appname    = undef;
+my $auth       = undef;
+my $outdir     = undef;
+
+# Event selection
+my $eventstart = undef;
+my $eventend   = undef;
+my @latrange   = ();      # (minlat:maxlat)
+my @lonrange   = ();      # (minlon:maxlon)
+my @degrange   = ();      # (lat:lon:maxradius[:minradius])
+my @deprange   = ();      # (mindepth:maxdepth)
+my @magrange   = ();      # (minmag:maxmag)
+my $magtype    = undef;
+my $catalog    = undef;
+my $eventid    = undef;
+my $eventfile  = undef;
+
+# Data selection
+my $datastart  = undef;
+my $dataend    = undef;
+my $net        = undef;
+my $sta        = undef;
+my $loc        = undef;
+my $chan       = undef;
+my $qual       = "B";
+my $datafile   = undef;
+
+# List of selected events in the following format:
+# EventID|Time|Latitude|Longitude|Depth|Author|Catalog|Contributor|ContributorID|MagType|Magnitude|MagAuthor|EventLocationName
+my @events     = undef;
+
+# List of selected channels in the following format:
+# Network|Station|Location|Channel|Latitude|Longitude|Elevation|Depth|Azimuth|Dip|Instrument|Scale|ScaleFreq|ScaleUnits|SampleRate|StartTime|EndTime
+my @channels   = undef;
+
+my $inflater   = undef;
+
+# If Compress::Raw::Zlib is available configure inflater for RFC 1952 (gzip)
+if ( eval("use Compress::Raw::Zlib; 1") ) {
+  use Compress::Raw::Zlib; 
+  $inflater = new Compress::Raw::Zlib::Inflate( -WindowBits => WANT_GZIP,
+						-ConsumeInput => 0 );
+}
+
+# Parse command line arguments
+Getopt::Long::Configure ("bundling_override");
+my $getoptsret = GetOptions ( 'help|usage|h'    => \$usage,
+                              'verbose|v+'      => \$verbose,
+                              'nobs'            => \$nobsprint,
+			      'appname|A=s'     => \$appname,
+			      'auth|a=s'        => \$auth,
+			      'outdir|d=s'      => \$outdir,
+
+			      'eventstart|es=s' => \$eventstart,
+			      'eventend|ee=s'   => \$eventend,
+			      'lat=s'           => \@latrange,
+                              'lon=s'           => \@lonrange,
+                              'radius=s'        => \@degrange,
+			      'depth=s'         => \@deprange,
+			      'mag=s'           => \@magrange,
+			      'magtype=s'       => \$magtype,
+                              'catalog|cat=s'   => \$catalog,
+			      'eventid|evid=s'  => \$eventid,
+			      'eventfile=s'     => \$eventfile,
+
+                              'datastart|ds=s'  => \$datastart,
+                              'dataend|de=s'    => \$dataend,
+                              'net|N=s'         => \$net,
+                              'sta|S=s'         => \$sta,
+                              'loc|L=s'         => \$loc,
+                              'chan|C=s'        => \$chan,
+                              'qual|Q=s'        => \$qual,
+                              'datafile=s'      => \$datafile,
+			    );
+
+my $erequired =  ( defined $eventstart || defined $eventend ||
+		   scalar @latrange || scalar @lonrange || scalar @degrange ||
+		   scalar @deprange || scalar @magrange ||
+		   defined $catalog || defined $eventid );
+
+my $drequired =  ( defined $datastart || $dataend ||
+		   defined $net || defined $sta || defined $chan );
+
+if ( ! $getoptsret || $usage || ! ($erequired || $eventfile) || ! ($drequired || $datafile) ) {
+  print "$scriptname: Fetch event windowed waveforms from the IRIS DMC ($version)\n";
+  print "http://www.iris.edu/ws/wsclients/\n\n";
+  print "Usage: $scriptname [options]\n\n";
+  print " Options:\n";
+  print " -v                More verbosity, may be specified multiple times (-vv, -vvv)\n";
+  print "\n";
+  print "Event selection:\n";
+  print " -es eventstart    Limit to origins after time (YYYY-MM-DD,HH:MM:SS.sss)\n";
+  print " -ee eventend      Limit to origins before time (YYYY-MM-DD,HH:MM:SS.sss)\n";
+  print " --lat min:max     Specify a minimum and/or maximum latitude range\n";
+  print " --lon min:max     Specify a minimum and/or maximum longitude range\n";
+  print " --radius lat:lon:maxradius[:minradius]\n";
+  print "                     Specify circular region with optional minimum radius\n";
+  print " --depth min:max   Specify a minimum and/or maximum depth in kilometers\n";
+  print " --mag min:max     Specify a minimum and/or maximum magnitude\n";
+  print " --magtype type    Specify a magnitude type for magnitude range limits\n";
+  print " --cat name        Limit to origins from specific catalog (e.g. ISC, PDE, GCMT)\n";
+  print " --evid id         Select a specific event by DMC event ID\n";
+  print "\n";
+  print "Data selection:\n";
+  print " -N,--net          Network code, list and wildcards (* and ?) accepted\n";
+  print " -S,--sta          Station code, list and wildcards (* and ?) accepted\n";
+  print " -L,--loc          Location ID, list and wildcards (* and ?) accepted\n";
+  print " -C,--chan         Channel codes, list and wildcards (* and ?) accepted\n";
+  print " -Q,--qual         Quality indicator, default is best\n";
+  print " -ds datastart     Specify data start time (YYYY-MM-DD,HH:MM:SS.ssssss)\n";
+  print " -de dataend       Specify data end time (YYYY-MM-DD,HH:MM:SS.ssssss)\n";
+  print "\n";
+  print " -A appname        Application/version string for identification\n";
+#  print " -a user:pass      User and password when authentication is needed\n";
+  print "\n";
+  print " -o outdir         Specify data output directory, one directory per event\n";
+  print "\n";
+  exit 1;
+}
+
+# Print script name and local time string
+if ( $verbose ) {
+  my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+  printf STDERR "$scriptname ($version) at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec;
+}
+
+# Normalize event time strings
+if ( $eventstart ) {
+  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $eventstart);
+  $eventstart = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+  $eventstart .= ".$subsec" if ( $subsec );
+}
+
+if ( $eventend ) {
+  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $eventend);
+  $eventend = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+  $eventend .= ".$subsec" if ( $subsec );
+}
+
+# Validate and prepare lat, lon and radius input
+if ( scalar @latrange ) {
+  @latrange = split (/:/, $latrange[0]);
+
+  if ( $latrange[0] && ($latrange[0] < -90.0 || $latrange[0] > 90.0) ) {
+    die "Minimum latitude out of range: $latrange[0]\n";
+  }
+  if ( $latrange[1] && ($latrange[1] < -90.0 || $latrange[1] > 90.0) ) {
+    die "Maximum latitude out of range: $latrange[1]\n";
+  }
+}
+if ( scalar @lonrange ) {
+  @lonrange = split (/\:/, $lonrange[0]);
+
+  if ( $lonrange[0] && ($lonrange[0] < -180.0 || $lonrange[0] > 180.0) ) {
+    die "Minimum longitude out of range: $lonrange[0]\n";
+  }
+  if ( $lonrange[1] && ($lonrange[1] < -180.0 || $lonrange[1] > 180.0) ) {
+    die "Maximum longitude out of range: $lonrange[1]\n";
+  }
+}
+if ( scalar @degrange ) {
+  @degrange = split (/\:/, $degrange[0]);
+
+  if ( scalar @degrange < 3 || scalar @degrange > 4 ) {
+    die "Unrecognized radius specification: @degrange\n";
+  }
+  if ( $degrange[0] && ($degrange[0] < -90.0 || $degrange[0] > 90.0) ) {
+    die "Radius latitude out of range: $degrange[0]\n";
+  }
+  if ( $degrange[1] && ($degrange[1] < -180.0 || $degrange[1] > 180.0) ) {
+    die "Radius longitude out of range: $degrange[1]\n";
+  }
+}
+if ( scalar @deprange ) {
+  @deprange = split (/\:/, $deprange[0]);
+
+  if ( $deprange[0] && ($deprange[0] < -7000 || $deprange[0] > 7000) ) {
+    die "Minimum depth out of range: $deprange[0]\n";
+  }
+  if ( $deprange[1] && ($deprange[1] < -7000 || $deprange[1] > 7000) ) {
+    die "Maximum depth out of range: $deprange[1]\n";
+  }
+}
+if ( scalar @magrange ) {
+  @magrange = split (/\:/, $magrange[0]);
+
+  if ( $magrange[0] && ($magrange[0] < -50 || $magrange[0] > 15) ) {
+    die "Minimum magnitude out of range: $magrange[0]\n";
+  }
+  if ( $magrange[1] && ($magrange[1] < -50 || $magrange[1] > 15) ) {
+    die "Maximum magnitude out of range: $magrange[1]\n";
+  }
+}
+
+# Report event selection criteria
+if ( $verbose > 2 ) {
+  print STDERR "Latitude range: $latrange[0] : $latrange[1]\n" if ( scalar @latrange );
+  print STDERR "Longitude range: $lonrange[0] : $lonrange[1]\n" if ( scalar @lonrange );
+  print STDERR "Radius range: $degrange[0] : $degrange[1] : $degrange[2] : $degrange[3]\n" if ( scalar @degrange );
+  print STDERR "Depth range: $deprange[0] : $deprange[1]\n" if ( scalar @deprange );
+  print STDERR "Magnitude range: $magrange[0] : $magrange[1]\n" if ( scalar @magrange );
+}
+
+my $eventbuffer = undef;
+my $eventrecvsize = undef;
+
+# Fetch and/or read events
+&FetchEvents() if ( $erequired );
+#&ReadEventFile() if ( $eventfile );
+
+if ( $verbose ) {
+  printf STDERR "Selected %d events\n", scalar @events;
+}
+
+foreach my $event ( @events ) {
+  my $channelbuffer = undef;
+  my $channelrecvsize = undef;
+
+  # EventID|Time|Latitude|Longitude|Depth|Author|Catalog|Contributor|ContributorID|MagType|Magnitude|MagAuthor|EventLocationName
+  my ($evid,$etime,$elat,$elon,$edepth,$eauthor,$ecatalog,$econtributor,$econtributorid,$emagtype,$emag,$emagauthor,$elocationname)
+    = split (/|/, $event);
+
+  # Fetch channel metadata for this event
+  my $rstart = ( $datastart ) ? $datastart : $evstart;
+  my $rend = ( $dataend ) ? $dataend : $ev;
+
+}
+
+my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+printf STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec;
+## End of main
+
+
+
+
+######################################################################
+# FetchEvents:
+#
+# Collect event information for selected data set.  The returned
+# events are added to the global @events list.
+#
+######################################################################
+sub FetchEvents {
+
+  # Create HTTP user agent
+  my $ua = RequestAgent->new();
+
+  # Create web service URI
+  my $uri = "${eventservice}/query?";
+  $uri .= "output=text";
+  $uri .= "&orderby=time";
+  $uri .= "&starttime=$eventstart" if ( $eventstart );
+  $uri .= "&endtime=$eventend" if ( $eventend );
+  if ( scalar @latrange ) {
+    $uri .= "&minlat=$latrange[0]" if ( $latrange[0] );
+    $uri .= "&maxlat=$latrange[1]" if ( $latrange[1] );
+  }
+  if ( scalar @lonrange ) {
+    $uri .= "&minlon=$lonrange[0]" if ( $lonrange[0] );
+    $uri .= "&maxlon=$lonrange[1]" if ( $lonrange[1] );
+  }
+  if ( scalar @degrange ) {
+    $uri .= "&lat=$degrange[0]" if ( $degrange[0] );
+    $uri .= "&lon=$degrange[1]" if ( $degrange[1] );
+    $uri .= "&maxradius=$degrange[2]" if ( $degrange[2] );
+    $uri .= "&minradius=$degrange[3]" if ( $degrange[3] );
+  }
+  if ( scalar @deprange ) {
+    $uri .= "&mindepth=$deprange[0]" if ( $deprange[0] );
+    $uri .= "&maxdepth=$deprange[1]" if ( $deprange[1] );
+  }
+  if ( scalar @magrange ) {
+    $uri .= "&minmag=$magrange[0]" if ( $magrange[0] );
+    $uri .= "&maxmag=$magrange[1]" if ( $magrange[1] );
+  }
+  $uri .= "&magtype=$magtype" if ( $magtype );
+  $uri .= "&catalog=$catalog" if ( $catalog );
+  $uri .= "&eventId=$eventid" if ( $eventid );
+
+  my $ftime = Time::HiRes::time;
+
+  print STDERR "Event URI: '$uri'\n" if ( $verbose > 1 );
+
+  print STDERR "Fetching event information :: " if ( $verbose );
+
+  $eventbuffer = "";
+  $eventrecvsize = 0;
+
+  # Fetch event information from web service using callback routine
+  # Also request compressed content if support exists
+  my $response = ( $inflater ) ?
+    $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&EDCallBack ) :
+    $ua->get($uri, ':content_cb' => \&EDCallBack );
+
+  if ( $response->code == 404 || $response->code == 204 ) {
+    print (STDERR "No data available\n") if ( $verbose );
+    return;
+  }
+  elsif ( ! $response->is_success() ) {
+    print (STDERR "Error fetching data: "
+	   . $response->code . " :: " . status_message($response->code) . "\n");
+    print STDERR "------\n" . $response->decoded_content . "\n------\n";
+    print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+  }
+  else {
+    printf (STDERR "%s\n", ($nobsprint)?sizestring($eventrecvsize):"") if ( $verbose );
+  }
+
+  my $duration = Time::HiRes::time - $ftime;
+  my $rate = $eventrecvsize/(($duration)?$duration:0.000001);
+  printf (STDERR "Received %s of event information in %.1f seconds (%s/s)\n",
+	  sizestring($eventrecvsize), $duration, sizestring($rate));
+
+  # Return if no data received
+  return if ( length $eventbuffer <= 0 );
+
+  my $ptime = Time::HiRes::time;
+  print STDERR "Parsing event data... " if ( $verbose );
+
+  # Add to list of events
+  my $totalevents = 0;
+
+  foreach my $event ( split /\n+/,$eventbuffer ) {
+    next if ( $event =~ /^#/ );
+    push (@events, chomp($event));
+    $totalevents++;
+  }
+
+  printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose );
+
+  my $duration = Time::HiRes::time - $ftime;
+  my $rate = (length $eventbuffer)/(($duration)?$duration:0.000001);
+  printf (STDERR "Processed event information for $totalevents events in %.1f seconds (%s/s)\n",
+	  $duration, sizestring($rate));
+
+
+} # End of FetchMetaData()
+
+
+######################################################################
+# EDCallBack:
+#
+# A call back for LWP downloading.
+######################################################################
+sub EDCallBack {
+  my ($data, $response, $protocol) = @_;
+  $eventrecvsize += length($data);
+
+  if ( $response->content_encoding() =~ /gzip/ ) {
+    my $datablock;
+    $inflater->inflate($data, $datablock);
+    $eventbuffer .= $datablock;
+  }
+  else {
+    $eventbuffer .= $data;
+  }
+
+  if ( $verbose && ! $nobsprint ) {
+    printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($eventrecvsize));
+  }
+}
+
+
+######################################################################
+# FetchMetaData:
+#
+# Collect metadata and expand wildcards for selected data set.
+#
+# Resulting metadata is placed in the global @metadata array with each
+# entry taking the following form:
+#   "net,sta,loc,chan,start,end,lat,lon,elev,depth,azimuth,dip,instrument,samplerate,sensitivity,sensfreq,sensunits"
+#
+# In addition, an entry for the unique NSLCQ time-window is added to
+# the %request hash, used later to request data.  The value of the
+# request hash entries is maintained to be the range of Channel epochs
+# that match the time selection.
+#
+######################################################################
+sub FetchMetaData {
+  my ($rnet,$rsta,$rloc,$rchan,$rstart,$rend) = @_;
+
+  # Create HTTP user agent
+  my $ua = RequestAgent->new();
+
+  my $level = "chan";
+
+  # Create web service URI
+  my $uri = "${metadataservice}/query?";
+  $uri .= "output=text";
+  $uri .= "&level=orderby=timechannel";
+  $uri .= "&network=$rnet" if ( $rnet );
+  $uri .= "&station=$rsta" if ( $rsta );
+  $uri .= "&location=$rloc" if ( $rloc );
+  $uri .= "&channel=$rchan" if ( $rchan );
+  $uri .= "&starttime=$rstart" if ( $rstart );
+  $uri .= "&endtime=$rend" if ( $rend );
+
+  my $ftime = Time::HiRes::time;
+
+  print STDERR "Metadata URI: '$uri'\n" if ( $verbose > 1 );
+
+  print STDERR "Fetching metadata :: " if ( $verbose );
+
+  $datasize = 0;
+  $metadataxml = "";
+
+  # Fetch metadata from web service using callback routine
+  my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
+
+  if ( $response->code == 404 || $response->code == 204 ) {
+    print (STDERR "No data available\n") if ( $verbose );
+    return;
+  }
+  elsif ( ! $response->is_success() ) {
+    print (STDERR "Error fetching data: "
+	   . $response->code . " :: " . status_message($response->code) . "\n");
+    print STDERR "------\n" . $response->decoded_content . "\n------\n";
+    print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+  }
+  else {
+    printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
+  }
+
+  my $duration = Time::HiRes::time - $ftime;
+  my $rate = $datasize/(($duration)?$duration:0.000001);
+  printf (STDERR "Received %s of metadata in %.1f seconds (%s/s)\n",
+	  sizestring($datasize), $duration, sizestring($rate));
+
+  # Return if no metadata received
+  return if ( length $metadataxml <= 0 );
+
+
+  my $totalepochs = 0;
+
+  my $ptime = Time::HiRes::time;
+
+  print STDERR "Parsing channel metadata... " if ( $verbose );
+
+  # CHAD
+
+  printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose );
+
+  my $duration = Time::HiRes::time - $ftime;
+  my $rate = $datasize/(($duration)?$duration:0.000001);
+  printf (STDERR "Processed metadata for $totalepochs %s epochs in %.1f seconds (%s/s)\n",
+	  ($stalevel)?"station":"channel",$duration, sizestring($rate));
+
+} # End of FetchMetaData()
+
+
+######################################################################
+# MDCallBack:
+#
+# A call back for LWP downloading of metadata.
+#
+# Add received data to metadataxml string, tally up the received data
+# size and print and updated (overwriting) byte count string.
+######################################################################
+sub MDCallBack {
+  my ($data, $response, $protocol) = @_;
+  $metadataxml .= $data;
+  $datasize += length($data);
+
+  if ( $verbose && ! $nobsprint ) {
+    printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
+  }
+}
+
+
+######################################################################
+# sizestring (bytes):
+#
+# Return a clean size string for a given byte count.
+######################################################################
+sub sizestring { # sizestring (bytes)
+  my $bytes = shift;
+
+  if ( $bytes < 1000 ) {
+    return sprintf "%d Bytes", $bytes;
+  }
+  elsif ( ($bytes / 1024) < 1000 ) {
+    return sprintf "%.1f KB", $bytes / 1024;
+  }
+  elsif ( ($bytes / 1024 / 1024) < 1000 ) {
+    return sprintf "%.1f MB", $bytes / 1024 / 1024;
+  }
+  elsif ( ($bytes / 1024 / 1024 / 1024) < 1000 ) {
+    return sprintf "%.1f GB", $bytes / 1024 / 1024 / 1024;
+  }
+  elsif ( ($bytes / 1024 / 1024 / 1024 / 1024) < 1000 ) {
+    return sprintf "%.1f TB", $bytes / 1024 / 1024 / 1024 / 1024;
+  }
+  else {
+    return "";
+  }
+} # End of sizestring()
+
+
+######################################################################
+#
+# Package RequestAgent: a superclass for LWP::UserAgent with override
+# of LWP::UserAgent methods to set default user agent and handle
+# authentication credentials.
+#
+######################################################################
+BEGIN {
+  use LWP;
+  package RequestAgent;
+  our @ISA = qw(LWP::UserAgent);
+
+  sub new
+    {
+      my $self = LWP::UserAgent::new(@_);
+      my $fulluseragent = $useragent;
+      $fulluseragent .= " ($appname)" if ( $appname );
+      $self->agent($fulluseragent);
+      $self;
+    }
+
+  sub get_basic_credentials
+    {
+      my ($self, $realm, $uri) = @_;
+
+      if ( defined $auth ) {
+        return split(':', $auth, 2);
+      }
+      elsif (-t) {
+        my $netloc = $uri->host_port;
+        print "\n";
+        print "Enter username for $realm at $netloc: ";
+        my $user = <STDIN>;
+        chomp($user);
+        return (undef, undef) unless length $user;
+        print "Password: ";
+        system("stty -echo");
+        my $password = <STDIN>;
+        system("stty echo");
+        print "\n";  # because we disabled echo
+        chomp($password);
+        return ($user, $password);
+      }
+      else {
+        return (undef, undef)
+      }
+    }
+} # End of LWP::UserAgent override
+
+
+
+######################################################################
+# ReadSelectFile:
+#
+# Read selection list file and add entries to the @selections array.
+#
+# Selection lines are expected to be in the following form:
+#
+# "Net Sta Loc Chan Start End"
+#
+# The Net, Sta, Loc and Channel fields are required and can be
+# specified as wildcards.
+######################################################################
+sub ReadSelectFile {
+  my $selectfile = shift;
+
+  open (SF, "<$selectfile") || die "Cannot open '$selectfile': $!\n";
+
+  foreach my $line ( <SF> ) {
+    chomp $line;
+    next if ( $line =~ /^\#/ ); # Skip comment lines
+
+    my ($net,$sta,$loc,$chan,$start,$end) = split (' ', $line);
+
+    next if ( ! defined $chan );
+
+    # Normalize time strings
+    if ( $start ) {
+      my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $start);
+      $start = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+      $start .= ".$subsec" if ( $subsec );
+    }
+
+    if ( $end ) {
+      my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $end);
+      $end = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+      $end .= ".$subsec" if ( $subsec );
+    }
+
+    # Add selection to global list
+    push (@selections,"$net|$sta|$loc|$chan|$start|$end");
+  }
+
+  close SF;
+} # End of ReadSelectFile()
