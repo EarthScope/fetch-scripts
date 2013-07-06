@@ -120,6 +120,10 @@
 #  - Allow dash characters in breqfast formatted requests for the network
 #  fields to support virtual networks that use dashes.
 #
+# 2013.186
+#  - Change service URL override command line options to match
+#  environment variables.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -130,7 +134,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.150";
+my $version = "2013.186";
 
 my $scriptname = basename($0);
 
@@ -225,10 +229,10 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
 			      'sacpzdir|sd=s'  => \$sacpzdir,
 			      'respdir|rd=s'   => \$respdir,
 			      'metafile|m=s'   => \$metafile,
-			      'tsurl=s'        => \$timeseriesservice,
-			      'msurl=s'        => \$metadataservice,
-			      'sacpzurl=s'     => \$sacpzservice,
-			      'respurl=s'      => \$respservice,
+			      'timeseriesws=s' => \$timeseriesservice,
+			      'metadataws=s'   => \$metadataservice,
+			      'sacpzws=s'      => \$sacpzservice,
+			      'respws=s'       => \$respservice,
 			    );
 
 my $required =  ( defined $net || defined $sta ||
