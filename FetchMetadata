@@ -136,6 +136,9 @@
 #  - Add checking of environment variables that will override the web
 #  service base path (i.e. host name).
 #
+# 2013.186
+#  - Change service URL override command line options to match
+#  environment variables.
 #
 # Author: Chad Trabant, IRIS Data Management Center
 
@@ -147,7 +150,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2013.077";
+my $version  = "2013.186";
 
 my $scriptname = basename($0);
 
@@ -206,7 +209,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
 			      'auth|a=s'          => \$auth,
 			      'outfile|o=s'       => \$outfile,
 			      'xmlfile|X=s'       => \$xmlfile,
-			      'msurl=s'           => \$metadataservice,
+			      'metadataws=s'      => \$metadataservice,
 			    );
 
 my $required =  ( defined $net || defined $sta ||
