@@ -15,7 +15,7 @@
 #
 # ## Change history ##
 #
-# 2012.309:
+# 2012.329:
 #  - Initial version.
 #
 # Author: Chad Trabant, IRIS Data Managment Center
@@ -27,8 +27,9 @@ use LWP::UserAgent;
 use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
+use Math::Trig;
 
-my $version = "2012.309";
+my $version = "2012.329";
 
 my $scriptname = basename($0);
 
@@ -46,6 +47,10 @@ my $traveltimeservice = 'http://www.iris.edu/ws/traveltime';
 
 # HTTP UserAgent reported to web services
 my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
+
+# Recongized phase list
+my @phaselist = ('p','s','P','S','Pn','Sn','Pdiff','Sdiff','PKP','SKS','PKiKP','SKiKS','PKIKP','SKIKS');
+my @phases = ();
 
 my $usage      = undef;
 my $verbose    = undef;
@@ -77,13 +82,15 @@ my $chan       = undef;
 my $qual       = "B";
 my $datafile   = undef;
 
+my @phases = ();
+
 # List of selected events in the following format:
 # EventID|Time|Latitude|Longitude|Depth|Author|Catalog|Contributor|ContributorID|MagType|Magnitude|MagAuthor|EventLocationName
-my @events     = undef;
+my @events     = ();
 
 # List of selected channels in the following format:
 # Network|Station|Location|Channel|Latitude|Longitude|Elevation|Depth|Azimuth|Dip|Instrument|Scale|ScaleFreq|ScaleUnits|SampleRate|StartTime|EndTime
-my @channels   = undef;
+my @channels   = ();
 
 my $inflater   = undef;
 
@@ -130,8 +137,7 @@ my $erequired =  ( defined $eventstart || defined $eventend ||
 		   scalar @deprange || scalar @magrange ||
 		   defined $catalog || defined $eventid );
 
-my $drequired =  ( defined $datastart || $dataend ||
-		   defined $net || defined $sta || defined $chan );
+my $drequired =  ( defined $net || defined $sta || defined $chan );
 
 if ( ! $getoptsret || $usage || ! ($erequired || $eventfile) || ! ($drequired || $datafile) ) {
   print "$scriptname: Fetch event windowed waveforms from the IRIS DMC ($version)\n";
@@ -176,18 +182,28 @@ if ( $verbose ) {
   printf STDERR "$scriptname ($version) at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec;
 }
 
-# Normalize event time strings
-if ( $eventstart ) {
-  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $eventstart);
-  $eventstart = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
-  $eventstart .= ".$subsec" if ( $subsec );
+if ( $datastart ) {
+  if ($datastart =~ /[A-Za-z]+[\+\-][0-9\.]+/ || $datastart =~ /[0-9\.]+[\+\-][A-Za-z]+/) {
+    
+  }
+  else {
+    $datastart = &NormalizeTimeString($datastart);
+  }
+}
+if ( $dataend ) {
+  if ($dataend =~ /[A-Za-z]+[\+\-][0-9\.]+/ || $dataend =~ /[0-9\.]+[\+\-][A-Za-z]+/) {
+    
+  }
+  else {
+    $dataend = &NormalizeTimeString($dataend);
+  }
 }
 
-if ( $eventend ) {
-  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $eventend);
-  $eventend = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
-  $eventend .= ".$subsec" if ( $subsec );
-}
+# Normalize event time strings
+$eventstart = &NormalizeTimeString($eventstart) if ( $eventstart );
+$eventend = &NormalizeTimeString($eventend) if ( $eventend );
+
+
 
 # Validate and prepare lat, lon and radius input
 if ( scalar @latrange ) {
@@ -255,26 +271,63 @@ if ( $verbose > 2 ) {
 
 my $eventbuffer = undef;
 my $eventrecvsize = undef;
+my $channelbuffer = undef;
+my $channelrecvsize = undef;
 
 # Fetch and/or read events
 &FetchEvents() if ( $erequired );
 #&ReadEventFile() if ( $eventfile );
 
-if ( $verbose ) {
-  printf STDERR "Selected %d events\n", scalar @events;
-}
+printf STDERR "Selected %d events\n", scalar @events if ( $verbose );
 
 foreach my $event ( @events ) {
-  my $channelbuffer = undef;
-  my $channelrecvsize = undef;
-
   # EventID|Time|Latitude|Longitude|Depth|Author|Catalog|Contributor|ContributorID|MagType|Magnitude|MagAuthor|EventLocationName
   my ($evid,$etime,$elat,$elon,$edepth,$eauthor,$ecatalog,$econtributor,$econtributorid,$emagtype,$emag,$emagauthor,$elocationname)
-    = split (/|/, $event);
+    = split (/\|/, $event);
 
-  # Fetch channel metadata for this event
-  my $rstart = ( $datastart ) ? $datastart : $evstart;
-  my $rend = ( $dataend ) ? $dataend : $ev;
+  $etime = &NormalizeTimeString ($etime);
+
+  # Fetch channel metadata for this event, match naming criteria with 30 minute window
+  my $cstart = $etime;
+  my $cend = &AddTimeToTimeString ($etime, 1800.0);
+
+  print STDERR "Fetching channel metadata for $emagtype $emag $elocationname ($evid) $etime\n" if ( $verbose );
+  print STDERR "  Channel start: $cstart,  Channel end: $cend\n" if ( $verbose > 1 );
+
+  # Fetch list of selected channels for this event
+  @channels = ();
+  FetchMetaData($net,$sta,$loc,$chan,$cstart,$cend);
+
+  # Default request window is 30 after origin time
+  my $rstart = ( $datastart ) ? $datastart : $etime;
+  my $rend = ( $dataend ) ? $dataend : &AddTimeToTimeString ($etime, 1800.0);
+
+  # Build request from channel list and requested time window
+  my @requests = ();
+  foreach my $channel ( @channels ) {
+    #Network|Station|Location|Channel|Latitude|Longitude|Elevation|Depth|Azimuth|Dip|Instrument|Scale|ScaleFreq|ScaleUnits|SampleRate|StartTime|EndTime
+    my ($net,$sta,$loc,$chan,$slat,$slon,$selev,$sdepth,$sazimuth,$sdip,$sinstrument,$sscale,$sscalefreq,$sscaleunits,$ssamprate,$sstarttime,$sendtime)
+      = split (/\|/, $channel);
+
+    $loc = "--" if ( $loc eq "  " );  # Translate space-space location IDs to "--"
+
+    my ($distance) = &distaz ($elat, $elon, $slat, $slon);
+    $distance = sprintf ("%.3f", $distance);
+
+    push (@requests, [$net,$sta,$loc,$chan,$rstart,$rend,$distance]);
+  }
+
+#CHAD, need to identify when datastart/end needs to be determined from travel times.
+
+  if ( $rstart =~ /[A-Za-z]+[\+\-][0-9\.]+/ || $rstart =~ /[0-9\.]+[\+\-][A-Za-z]+/ ||
+       $rend =~ /[A-Za-z]+[\+\-][0-9\.]+/ || $rend =~ /[0-9\.]+[\+\-][A-Za-z]+/ ) {
+
+    print"Found phase-based time selection: $rstart TO $rend \n";
+  }
+
+  foreach my $reqref ( @requests ) {
+    print STDERR "REQUEST: @$reqref\n";
+  }
 
 }
 
@@ -331,9 +384,9 @@ sub FetchEvents {
 
   my $ftime = Time::HiRes::time;
 
-  print STDERR "Event URI: '$uri'\n" if ( $verbose > 1 );
+  print STDERR "Event URI: '$uri'\n" if ( $verbose > 2 );
 
-  print STDERR "Fetching event information :: " if ( $verbose );
+  print STDERR "Fetching event information :: " if ( $verbose > 1 );
 
   $eventbuffer = "";
   $eventrecvsize = 0;
@@ -343,6 +396,8 @@ sub FetchEvents {
   my $response = ( $inflater ) ?
     $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&EDCallBack ) :
     $ua->get($uri, ':content_cb' => \&EDCallBack );
+
+  $inflater->inflateReset if ( $inflater );
 
   if ( $response->code == 404 || $response->code == 204 ) {
     print (STDERR "No data available\n") if ( $verbose );
@@ -355,7 +410,7 @@ sub FetchEvents {
     print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
   }
   else {
-    printf (STDERR "%s\n", ($nobsprint)?sizestring($eventrecvsize):"") if ( $verbose );
+    printf (STDERR "%s\n", ($nobsprint)?sizestring($eventrecvsize):"") if ( $verbose > 1 );
   }
 
   my $duration = Time::HiRes::time - $ftime;
@@ -367,18 +422,20 @@ sub FetchEvents {
   return if ( length $eventbuffer <= 0 );
 
   my $ptime = Time::HiRes::time;
-  print STDERR "Parsing event data... " if ( $verbose );
+
+  print STDERR "Parsing event data... " if ( $verbose > 1 );
 
   # Add to list of events
   my $totalevents = 0;
 
-  foreach my $event ( split /\n+/,$eventbuffer ) {
+  foreach my $event ( split(/\n+/, $eventbuffer) ) {
     next if ( $event =~ /^#/ );
-    push (@events, chomp($event));
+    chomp($event);
+    push (@events, $event);
     $totalevents++;
   }
 
-  printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose );
+  printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose > 1 );
 
   my $duration = Time::HiRes::time - $ftime;
   my $rate = (length $eventbuffer)/(($duration)?$duration:0.000001);
@@ -386,7 +443,7 @@ sub FetchEvents {
 	  $duration, sizestring($rate));
 
 
-} # End of FetchMetaData()
+} # End of FetchEvents()
 
 
 ######################################################################
@@ -407,7 +464,7 @@ sub EDCallBack {
     $eventbuffer .= $data;
   }
 
-  if ( $verbose && ! $nobsprint ) {
+  if ( $verbose > 1 && ! $nobsprint ) {
     printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($eventrecvsize));
   }
 }
@@ -416,16 +473,8 @@ sub EDCallBack {
 ######################################################################
 # FetchMetaData:
 #
-# Collect metadata and expand wildcards for selected data set.
-#
-# Resulting metadata is placed in the global @metadata array with each
-# entry taking the following form:
-#   "net,sta,loc,chan,start,end,lat,lon,elev,depth,azimuth,dip,instrument,samplerate,sensitivity,sensfreq,sensunits"
-#
-# In addition, an entry for the unique NSLCQ time-window is added to
-# the %request hash, used later to request data.  The value of the
-# request hash entries is maintained to be the range of Channel epochs
-# that match the time selection.
+# Collect channel metadata for selected data set.  The returned
+# channels are added to the global @channels list.
 #
 ######################################################################
 sub FetchMetaData {
@@ -439,7 +488,7 @@ sub FetchMetaData {
   # Create web service URI
   my $uri = "${metadataservice}/query?";
   $uri .= "output=text";
-  $uri .= "&level=orderby=timechannel";
+  $uri .= "&level=channel";
   $uri .= "&network=$rnet" if ( $rnet );
   $uri .= "&station=$rsta" if ( $rsta );
   $uri .= "&location=$rloc" if ( $rloc );
@@ -449,15 +498,20 @@ sub FetchMetaData {
 
   my $ftime = Time::HiRes::time;
 
-  print STDERR "Metadata URI: '$uri'\n" if ( $verbose > 1 );
+  print STDERR "Channel metadata URI: '$uri'\n" if ( $verbose > 2 );
 
-  print STDERR "Fetching metadata :: " if ( $verbose );
+  print STDERR "Fetching channel metadata :: " if ( $verbose > 1 );
 
-  $datasize = 0;
-  $metadataxml = "";
+  $channelbuffer = "";
+  $channelrecvsize = 0;
 
-  # Fetch metadata from web service using callback routine
-  my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
+  # Fetch channel information from web service using callback routine
+  # Also request compressed content if support exists
+  my $response = ( $inflater ) ?
+    $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&MDCallBack ) :
+    $ua->get($uri, ':content_cb' => \&MDCallBack );
+
+  $inflater->inflateReset if ( $inflater );
 
   if ( $response->code == 404 || $response->code == 204 ) {
     print (STDERR "No data available\n") if ( $verbose );
@@ -470,32 +524,37 @@ sub FetchMetaData {
     print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
   }
   else {
-    printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
+    printf (STDERR "%s\n", ($nobsprint)?sizestring($channelrecvsize):"") if ( $verbose > 1 );
   }
 
   my $duration = Time::HiRes::time - $ftime;
-  my $rate = $datasize/(($duration)?$duration:0.000001);
-  printf (STDERR "Received %s of metadata in %.1f seconds (%s/s)\n",
-	  sizestring($datasize), $duration, sizestring($rate));
+  my $rate = $channelrecvsize/(($duration)?$duration:0.000001);
+  printf (STDERR "Received %s of channel metadata in %.1f seconds (%s/s)\n",
+	  sizestring($channelrecvsize), $duration, sizestring($rate));
 
-  # Return if no metadata received
-  return if ( length $metadataxml <= 0 );
-
-
-  my $totalepochs = 0;
+  # Return if no channel metadata received
+  return if ( length $channelbuffer <= 0 );
 
   my $ptime = Time::HiRes::time;
 
-  print STDERR "Parsing channel metadata... " if ( $verbose );
+  print STDERR "Parsing channel metadata... " if ( $verbose > 1 );
 
-  # CHAD
+  # Add to list of channels
+  my $totalchannels = 0;
 
-  printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose );
+  foreach my $channel ( split(/\n+/, $channelbuffer) ) {
+    next if ( $channel =~ /^#/ );
+    chomp($channel);
+    push (@channels, $channel);
+    $totalchannels++;
+  }
+
+  printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose > 1 );
 
   my $duration = Time::HiRes::time - $ftime;
-  my $rate = $datasize/(($duration)?$duration:0.000001);
-  printf (STDERR "Processed metadata for $totalepochs %s epochs in %.1f seconds (%s/s)\n",
-	  ($stalevel)?"station":"channel",$duration, sizestring($rate));
+  my $rate = $channelrecvsize/(($duration)?$duration:0.000001);
+  printf (STDERR "Processed metadata for $totalchannels channels in %.1f seconds (%s/s)\n",
+	  $duration, sizestring($rate));
 
 } # End of FetchMetaData()
 
@@ -503,19 +562,57 @@ sub FetchMetaData {
 ######################################################################
 # MDCallBack:
 #
-# A call back for LWP downloading of metadata.
-#
-# Add received data to metadataxml string, tally up the received data
-# size and print and updated (overwriting) byte count string.
+# A call back for LWP downloading.
 ######################################################################
 sub MDCallBack {
   my ($data, $response, $protocol) = @_;
-  $metadataxml .= $data;
-  $datasize += length($data);
+  $channelrecvsize += length($data);
 
-  if ( $verbose && ! $nobsprint ) {
-    printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
+  if ( $response->content_encoding() =~ /gzip/ ) {
+    my $datablock = "";
+    $inflater->inflate($data, $datablock);
+    $channelbuffer .= $datablock;
   }
+  else {
+    $channelbuffer .= $data;
+  }
+
+  if ( $verbose > 1 && ! $nobsprint ) {
+    printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($channelrecvsize));
+  }
+}
+
+
+######################################################################
+# AddTimeToTimeString (timestr, seconds):
+#
+# Return a clean size string for a given byte count.
+######################################################################
+sub AddTimeToTimeString {
+  my $timestr = shift;
+  my $seconds = shift;
+
+  return undef if ( ! $seconds );
+
+  my $depoch = &mdtimestr2epoch ($timestr) + $seconds;
+
+  return &NormalizeTimeString(&epoch2mdtimestr ($depoch));
+} # End of AddTimeToTimeString()
+
+
+######################################################################
+# NormalizeTimeString (timestr):
+#
+# Return a time size string in a consistent format.
+######################################################################
+sub NormalizeTimeString {
+  my $timestr = shift;
+
+  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $timestr);
+  $timestr = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+  $timestr .= ".$subsec" if ( $subsec );
+
+  return $timestr;
 }
 
 
@@ -599,47 +696,462 @@ BEGIN {
 
 
 
-######################################################################
-# ReadSelectFile:
+############################################################################
+# distaz (lat1, lon1, lat2, lon2)
 #
-# Read selection list file and add entries to the @selections array.
+# Calculate delta (angular distance) and azimuth between two
+# geographic/geodetic coordinates.  The returned azimuth and
+# back-azimuth are with respect to the first coordinate pair.
+# Latitudes are converted to geocentric latitudes using the WGS84
+# spheriod to correct for ellipticity.
 #
-# Selection lines are expected to be in the following form:
-#
-# "Net Sta Loc Chan Start End"
-#
-# The Net, Sta, Loc and Channel fields are required and can be
-# specified as wildcards.
-######################################################################
-sub ReadSelectFile {
-  my $selectfile = shift;
+############################################################################
+sub distaz {
+  my ($lat1, $lon1, $lat2, $lon2) = @_;
 
-  open (SF, "<$selectfile") || die "Cannot open '$selectfile': $!\n";
+  # Major and minor axies for WGS84 spheriod
+  my $semimajor = 6378137.0;
+  my $semiminor = 6356752.3142;
 
-  foreach my $line ( <SF> ) {
-    chomp $line;
-    next if ( $line =~ /^\#/ ); # Skip comment lines
+  my $ratio2 = (($semiminor * $semiminor) / ($semimajor * $semimajor));
 
-    my ($net,$sta,$loc,$chan,$start,$end) = split (' ', $line);
+  my $pirad  = acos(-1.0) / 180.0;
+  my $halfpi = acos(-1.0) / 2;
 
-    next if ( ! defined $chan );
+  # Convert latitude to geocentric coordinates
+  my $nlat1 = atan ($ratio2 * tan ($lat1 * $pirad));
+  my $nlat2 = atan ($ratio2 * tan ($lat2 * $pirad));
 
-    # Normalize time strings
-    if ( $start ) {
-      my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $start);
-      $start = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
-      $start .= ".$subsec" if ( $subsec );
-    }
+  # Great circle calculation for delta and azimuth
+  my $gamma = ($lon2 - $lon1) * $pirad;
+  my $a = ($halfpi - $nlat2);
+  my $b = ($halfpi - $nlat1);
 
-    if ( $end ) {
-      my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $end);
-      $end = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
-      $end .= ".$subsec" if ( $subsec );
-    }
+  my $sita;
+  my $bsita;
 
-    # Add selection to global list
-    push (@selections,"$net|$sta|$loc|$chan|$start|$end");
+  if ( $a == 0.0 ) {
+    $sita = 1.0;
+  }
+  elsif ( $nlat2 == 0.0 ) {
+    $sita = 0.0;
+  }
+  else {
+    $sita = sin($b) / tan($a);
   }
 
-  close SF;
-} # End of ReadSelectFile()
+  if ( $b == 0.0 ) {
+    $bsita = 1.0;
+  }
+  elsif ( $nlat1 == 0.0 ) {
+    $bsita = 0.0;
+  }
+  else {
+    $bsita = sin($a) / tan($b);
+  }
+
+  my $delta = acos (cos($a) * cos($b) + sin($a) * sin($b) * cos($gamma)) / $pirad;
+
+  my $azimuth = atan2 (sin($gamma), $sita - cos($gamma) * cos($b)) / $pirad;
+  $azimuth = 0.0 if ( abs($azimuth) < 0.000001 );
+  $azimuth += 360 if ( $azimuth < 0.0 );
+
+  my $backazimuth = atan2 (-sin($gamma), $bsita - cos($gamma) * cos($a)) / $pirad;
+  $backazimuth = 0.0 if ( abs($backazimuth) < 0.000001 );
+  $backazimuth += 360 if ( $backazimuth < 0.0 );
+
+  return ($delta, $azimuth, $backazimuth);
+}
+
+
+############################################################################
+# TimeConv.pm
+#
+# Time conversion routines in Perl
+#
+# version 2012.315
+#
+# Chad Trabant, IRIS Data Management Center
+############################################################################
+
+use strict;
+
+############################################################################
+# time2epoch:
+#
+# Compute a double precision Unix/POSIX epoch time from the specified
+# year, day-of-year, hours, minutes, seconds and microseconds.
+#
+# Returns a double precision epoch time
+############################################################################
+sub time2epoch { # time2epoch (year,yday,hour,min,sec,usec)
+  my $year = shift;
+  my $yday = shift;
+  my $hour = shift;
+  my $min = shift;
+  my $sec = shift;
+  my $usec = shift;
+
+  if ( ! defined $year ) { $year = 0; }
+  if ( ! defined $yday ) { $yday = 1; }
+  if ( ! defined $hour ) { $hour = 0; }
+  if ( ! defined $min ) { $min = 0; }
+  if ( ! defined $sec ) { $sec = 0; }
+  if ( ! defined $usec ) { $usec = 0; }
+
+  # Calculate epoch
+  my $shortyear = $year - 1900;
+  my $a4 = int (($shortyear >> 2) + 475 - ! ($shortyear & 3));
+  my $a100 = int ($a4 / 25 - (($a4 % 25) < 0));
+  my $a400 = int ($a100 >> 2);
+
+  my $intervening_leap_days = ($a4 - 492) - ($a100 - 19) + ($a400 - 4);
+
+  my $days = (365 * ($shortyear - 70) + $intervening_leap_days + ($yday - 1));
+
+  my $epoch = (60 * (60 * (24 * $days + $hour) + $min) + $sec) + $usec / 1000000;
+
+  return $epoch;
+} # End of time2epoch()
+
+
+############################################################################
+# timestr2epoch:
+#
+# Compute a double precision Unix/POSIX epoch time by parsing a string
+# containing the year, day-of-year, hours, minutes, seconds and
+# microseconds.
+#
+# Example input string: "2006,141,10:11:33.12"
+#
+# Value : Range
+# Year  : 1900 - 3000
+# Yday  : 1 - 366
+# Hour  : 0 - 23
+# Min   : 0 - 59
+# Sec   : 0 - 59
+# Fract : No limit on the fraction seconds
+#
+# Returns a double precision epoch time
+############################################################################
+sub timestr2epoch { # timestr2epoch ("year,yday,hour:min:sec.fsec")
+  my $timestr = shift;
+
+  my ($year,$yday,$hour,$min,$sec,$fract) = split (/[-:,.\s\/]/,$timestr);
+
+  # Sanity check all input values and set defaults
+  if ( ! defined $year || $year < 1900 || $year > 3000 ) {
+    print "time2epoch: year ($year) is out of range\n";
+    return;
+  }
+
+  # Test for leap year
+  my $leap = ( (($year%4 == 0) && ($year%100 != 0)) || ($year%400 == 0) ) ? 1 : 0;
+
+  if ( ! defined $yday ) {
+    $yday = 1;
+  }
+  elsif ( $yday > 365+$leap || $yday < 0 ) {
+    print "time2epoch: day-of-year ($yday) is out of range\n";
+    return;
+  }
+  if ( ! defined $hour ) {
+    $hour = 0;
+  }
+  elsif ( $hour > 23 || $hour < 0 ) {
+    print "time2epoch: hour ($hour) is out of range\n";
+    return;
+  }
+  if ( ! defined $min ) {
+    $min = 0;
+  }
+  elsif ( $min > 59 || $min < 0 ) {
+    print "time2epoch: minute ($min) is out of range\n";
+    return;
+  }
+  if ( ! defined $sec ) {
+    $sec = 0;
+  }
+  elsif ( $sec > 59 || $sec < 0 ) {
+    print "time2epoch: second ($sec) is out of range\n";
+    return;
+  }
+
+  my $usec = 0;
+
+  # Convert the fractional seconds to microseconds
+  if ( defined $fract ) {
+    my $flen = length $fract;
+    $usec = $fract * (10 ** (6-$flen));
+  }
+
+  return time2epoch ($year,$yday,$hour,$min,$sec,$usec);
+} # End of timestr2epoch()
+
+
+############################################################################
+# mdtimestr2epoch:
+#
+# Compute a double precision Unix/POSIX epoch time by parsing a string
+# containing the year, month, day-of-month, hours, minutes, seconds and
+# microseconds.
+#
+# Example input string: "2006/5/21 10:11:33.12"
+#
+# Value : Range
+# Year  : 1900 - 3000
+# Month : 1 - 12
+# Mday  : 1 - 31
+# Hour  : 0 - 23
+# Min   : 0 - 59
+# Sec   : 0 - 59
+# Fract : No limit on the fraction seconds
+#
+# Returns a double precision epoch time
+############################################################################
+sub mdtimestr2epoch { # mdtimestr2epoch ("2006/5/21 10:11:33.12")
+  my $mdtimestr = shift;
+
+  my ($year,$month,$mday,$hour,$min,$sec,$fract) = split (/[-:,T.\s\/]/,$mdtimestr);
+
+  my $yday = undef;
+
+  if ( defined $year && defined $month && defined $mday ) {
+    $yday = &md2doy ($year, $month, $mday);
+  }
+
+  # Sanity check all input values and set defaults
+  if ( ! defined $year || $year < 1900 || $year > 3000 ) {
+    print "time2epoch: year ($year) is out of range\n";
+    return;
+  }
+
+  # Test for leap year
+  my $leap = ( (($year%4 == 0) && ($year%100 != 0)) || ($year%400 == 0) ) ? 1 : 0;
+
+  if ( ! defined $yday ) {
+    $yday = 1;
+  }
+  elsif ( $yday > 365+$leap || $yday < 0 ) {
+    print "time2epoch: day-of-year ($yday) is out of range\n";
+    return;
+  }
+  if ( ! defined $hour ) {
+    $hour = 0;
+  }
+  elsif ( $hour > 23 || $hour < 0 ) {
+    print "time2epoch: hour ($hour) is out of range\n";
+    return;
+  }
+  if ( ! defined $min ) {
+    $min = 0;
+  }
+  elsif ( $min > 59 || $min < 0 ) {
+    print "time2epoch: minute ($min) is out of range\n";
+    return;
+  }
+  if ( ! defined $sec ) {
+    $sec = 0;
+  }
+  elsif ( $sec > 59 || $sec < 0 ) {
+    print "time2epoch: second ($sec) is out of range\n";
+    return;
+  }
+
+  my $usec = 0;
+
+  # Convert the fractional seconds to microseconds
+  if ( defined $fract ) {
+    my $flen = length $fract;
+    $usec = $fract * (10 ** (6-$flen));
+  }
+
+  return time2epoch ($year,$yday,$hour,$min,$sec,$usec);
+} # End of mdtimestr2epoch()
+
+
+############################################################################
+# epoch2time:
+#
+# Convert an epoch time to year, day-of-year, hour, minute, second and
+# microseconds.
+#
+# Returns (year,yday,hour,min,sec,usec)
+############################################################################
+sub epoch2time { # epoch2time (epoch)
+  my $epoch  = shift;
+
+  return if ( ! defined $epoch );
+
+  my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday) = gmtime ($epoch);
+
+  $year += 1900;
+  $mon++;
+  $yday++;
+
+  my $usec = ($epoch - int $epoch) * 1000000;
+
+  return ($year,$yday,$hour,$min,$sec,$usec);
+} # End of epoch2time()
+
+
+############################################################################
+# epoch2timestr:
+#
+# Create a formatted time string from an epoch.
+#
+# Format: 'YYYY,DDD,HH:MM:SS.FFFFFF'
+#
+# Returns a formatted time string.
+############################################################################
+sub epoch2timestr { # epoch2timestr (epoch)
+  my $epoch  = shift;
+
+  return if ( ! defined $epoch );
+
+  my ($year,$yday,$hour,$min,$sec,$usec) = epoch2time ($epoch);
+
+  return sprintf ("%4d,%03d,%02d:%02d:%02d.%06d",
+		  $year,$yday,$hour,$min,$sec,$usec);
+} # End of epoch2timestr()
+
+
+############################################################################
+# epoch2mdtimestr:
+#
+# Create a month-day formatted time string from an epoch.
+#
+# Format: 'YYYY-MM-DD HH:MM:SS.FFFFFF'
+#
+# Returns a formatted time string.
+############################################################################
+sub epoch2mdtimestr { # epoch2mdtimestr (epoch)
+  my $epoch  = shift;
+
+  return if ( ! defined $epoch );
+
+  my ($year,$yday,$hour,$min,$sec,$usec) = epoch2time ($epoch);
+
+  my ($mon, $mday) = doy2md ($year, $yday);
+
+  return sprintf ("%4d-%02d-%02d %02d:%02d:%02d.%06d",
+		  $year,$mon,$mday,$hour,$min,$sec,$usec);
+} # End of epoch2mdtimestr()
+
+
+############################################################################
+# doy2md:
+#
+# Compute the month and day-of-month (mday) from a year and
+# day-of-year (yday).
+#
+# Year is expected to be in the range 1900-3000, jday is expected to
+# be in the range 1-366, month will be in the range 1-12 and mday
+# will be in the range 1-31
+#
+# Returns the month and day-of-month (mday)
+############################################################################
+sub doy2md {  # doy2md (year, yday)
+  my $year = shift;
+  my $yday = shift;
+
+  my @days = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31);
+  my $month = -1;
+  my $mday = -1;
+
+  # Sanity check for the supplied year
+  if ( $year < 1900 || $year > 3000 ) {
+    print "doy2md(): year ($year) is out of range\n";
+    return;
+  }
+
+  # Test for leap year
+  my $leap = ( (($year%4 == 0) && ($year%100 != 0)) || ($year%400 == 0) ) ? 1 : 0;
+
+  # Add a day to February if leap year
+  if ( $leap ) {
+    $days[1]++;
+  }
+
+  if ( $yday > 365+$leap || $yday <= 0 ) {
+    print "doy2md(): day-of-year ($yday) is out of range\n";
+    return;
+  }
+
+  for ( my $idx=0; $idx < 12; $idx++ ) {
+    $yday -= $days[$idx];
+
+    if ( $yday <= 0 ) {
+      $month = $idx + 1;
+      $mday = $days[$idx] + $yday;
+      last;
+    }
+  }
+
+  return ($month, $mday);
+}  # End of doy2md()
+
+
+############################################################################
+# md2doy:
+#
+# Compute the day-of-year from a year, month and day-of-month.
+#
+# Year is expected to be in the range 1900-3000, month is expected to
+# be in the range 1-12, mday is expected to be in the range 1-31 and
+# jday will be in the range 1-366
+#
+# Returns 0 on success and -1 on error.
+############################################################################
+sub md2doy { # md2doy (year, month, mday)
+  my $year = shift;
+  my $month = shift;
+  my $mday = shift;
+
+  my @days = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31);
+
+  # Sanity check for the supplied parameters */
+  if ( $year < 1900 || $year > 3000 ) {
+    print "md2doy(): year ($year) is out of range\n";
+    return;
+  }
+  if ( $month < 1 || $month > 12 ) {
+    print "md2doy(): month ($month) is out of range\n";
+    return;
+  }
+  if ( $mday < 1 || $mday > 31 ) {
+    print "md2doy(): day-of-month ($mday) is out of range\n";
+    return;
+  }
+
+  # Test for leap year
+  my $leap = ( (($year%4 == 0) && ($year%100 != 0)) || ($year%400 == 0) ) ? 1 : 0;
+
+  # Add a day to February if leap year
+  if ( $leap ) {
+    $days[1]++;
+  }
+
+  # Check that the day-of-month jives with specified month
+  if ( $mday > $days[$month-1] ) {
+    print "md2doy(): day-of-month ($mday) is out of range for month $month\n";
+    return;
+  }
+
+  $month--;
+
+  my $yday = 0;
+
+  for ( my $idx=0; $idx < 12; $idx++ ) {
+    if ( $idx == $month ) {
+      $yday += $mday;
+      last;
+    }
+
+    $yday += $days[$idx];
+  }
+
+  return $yday;
+}  # End of md2doy()
+
+#return 1;
