@@ -29,21 +29,21 @@ use HTTP::Date;
 use Time::HiRes;
 use Math::Trig;
 
-my $version = "2012.329";
+my $version = "2013.191";
 
 my $scriptname = basename($0);
 
 # Web service for event information
-my $eventservice = 'http://www.iris.edu/ws/event';
+my $eventservice = 'http://service.iris.edu/fdsnws/event/1/';
 
 # Web service for station metadata
-my $metadataservice = 'http://www.iris.edu/ws/station';
+my $metadataservice = 'http://service.iris.edu/fdsnws/station/1/';
 
 # Web service for bulk waveform data
-my $waveformservice = 'http://www.iris.edu/ws/bulkdataselect';
+my $waveformservice = 'http://service.iris.edu/fdsnws/dataselect/1/';
 
 # Web service for travel time calculations
-my $traveltimeservice = 'http://www.iris.edu/ws/traveltime';
+my $traveltimeservice = 'http://service.iris.edu/irisws/traveltime';
 
 # HTTP UserAgent reported to web services
 my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
@@ -309,7 +309,7 @@ foreach my $event ( @events ) {
     my ($net,$sta,$loc,$chan,$slat,$slon,$selev,$sdepth,$sazimuth,$sdip,$sinstrument,$sscale,$sscalefreq,$sscaleunits,$ssamprate,$sstarttime,$sendtime)
       = split (/\|/, $channel);
 
-    $loc = "--" if ( $loc eq "  " );  # Translate space-space location IDs to "--"
+    $loc =~s/ /\-/g;  # Translate location's spaces " " to dashes"-"
 
     my ($distance) = &distaz ($elat, $elon, $slat, $slon);
     $distance = sprintf ("%.3f", $distance);
@@ -352,31 +352,31 @@ sub FetchEvents {
 
   # Create web service URI
   my $uri = "${eventservice}/query?";
-  $uri .= "output=text";
+  $uri .= "format=text";
   $uri .= "&orderby=time";
   $uri .= "&starttime=$eventstart" if ( $eventstart );
   $uri .= "&endtime=$eventend" if ( $eventend );
   if ( scalar @latrange ) {
-    $uri .= "&minlat=$latrange[0]" if ( $latrange[0] );
-    $uri .= "&maxlat=$latrange[1]" if ( $latrange[1] );
+    $uri .= "&minlat=$latrange[0]" if ( defined $latrange[0] );
+    $uri .= "&maxlat=$latrange[1]" if ( defined $latrange[1] );
   }
   if ( scalar @lonrange ) {
-    $uri .= "&minlon=$lonrange[0]" if ( $lonrange[0] );
-    $uri .= "&maxlon=$lonrange[1]" if ( $lonrange[1] );
+    $uri .= "&minlon=$lonrange[0]" if ( defined $lonrange[0] );
+    $uri .= "&maxlon=$lonrange[1]" if ( defined $lonrange[1] );
   }
   if ( scalar @degrange ) {
-    $uri .= "&lat=$degrange[0]" if ( $degrange[0] );
-    $uri .= "&lon=$degrange[1]" if ( $degrange[1] );
-    $uri .= "&maxradius=$degrange[2]" if ( $degrange[2] );
-    $uri .= "&minradius=$degrange[3]" if ( $degrange[3] );
+    $uri .= "&lat=$degrange[0]" if ( defined $degrange[0] );
+    $uri .= "&lon=$degrange[1]" if ( defined $degrange[1] );
+    $uri .= "&maxradius=$degrange[2]" if ( defined $degrange[2] );
+    $uri .= "&minradius=$degrange[3]" if ( defined $degrange[3] );
   }
   if ( scalar @deprange ) {
-    $uri .= "&mindepth=$deprange[0]" if ( $deprange[0] );
-    $uri .= "&maxdepth=$deprange[1]" if ( $deprange[1] );
+    $uri .= "&mindepth=$deprange[0]" if ( defined $deprange[0] );
+    $uri .= "&maxdepth=$deprange[1]" if ( defined $deprange[1] );
   }
   if ( scalar @magrange ) {
-    $uri .= "&minmag=$magrange[0]" if ( $magrange[0] );
-    $uri .= "&maxmag=$magrange[1]" if ( $magrange[1] );
+    $uri .= "&minmag=$magrange[0]" if ( defined $magrange[0] );
+    $uri .= "&maxmag=$magrange[1]" if ( defined $magrange[1] );
   }
   $uri .= "&magtype=$magtype" if ( $magtype );
   $uri .= "&catalog=$catalog" if ( $catalog );
@@ -487,7 +487,7 @@ sub FetchMetaData {
 
   # Create web service URI
   my $uri = "${metadataservice}/query?";
-  $uri .= "output=text";
+  $uri .= "format=text";
   $uri .= "&level=channel";
   $uri .= "&network=$rnet" if ( $rnet );
   $uri .= "&station=$rsta" if ( $rsta );
