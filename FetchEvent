@@ -120,6 +120,9 @@
 #  functionality of -allorigins and -allmags
 #  --celso
 #
+# 2013.197
+#  - Fix parsing of element values of "0".
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -130,7 +133,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.176";
+my $version = "2013.197";
 
 my $scriptname = basename($0);
 
@@ -848,7 +851,7 @@ sub FetchEvents {
   sub characters {
     my ($self,$element) = @_;
 
-    if ( $element->{Data} && $inevent ) {
+    if ( defined $element->{Data} && $inevent ) {
 
       if ( $inpreferredOriginID ) { $porigin .= $element->{Data}; }
       elsif ( $inpreferredMagnitudeID ) { $pmagnitude .= $element->{Data}; }

@@ -124,6 +124,9 @@
 #  - Change service URL override command line options to match
 #  environment variables.
 #
+# 2013.197
+#  - Fix parsing of element values of "0".
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -134,7 +137,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.186";
+my $version = "2013.197";
 
 my $scriptname = basename($0);
 
@@ -1253,7 +1256,7 @@ sub FetchMetaData {
   sub characters {
     my ($self,$element) = @_;
 
-    if ( $element->{Data} ) {
+    if ( defined $element->{Data} ) {
       if ( $inlat ) { $lat .= $element->{Data}; }
       elsif ( $inlon ) { $lon .= $element->{Data}; }
       elsif ( $inelevation ) { $elev .= $element->{Data}; }
