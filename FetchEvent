@@ -123,17 +123,21 @@
 # 2013.197
 #  - Fix parsing of element values of "0".
 #
+# 2013.198
+#  - Add test for minimum version of LWP (libwww) module of 5.806.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
 use File::Basename;
 use Getopt::Long;
+use LWP 5.806; # Require minimum version
 use LWP::UserAgent;
 use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.197";
+my $version = "2013.198";
 
 my $scriptname = basename($0);
 
