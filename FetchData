@@ -130,6 +130,13 @@
 # 2013.198
 #  - Add test for minimum version of LWP (libwww) module of 5.806.
 #
+# 2013.212
+#  - Fetch metadata for request by default, this allows grouping of time series
+#  requests and ultimately more efficient recovery in the case of connection
+#  breaks.  Also added an option of --nometadata or -nm to suppress the
+#  fetching of metadata when it is not strictly needed.
+#  - Remove lingering overrides to deprecated service locations.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -141,7 +148,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.198";
+my $version = "2013.212";
 
 my $scriptname = basename($0);
 
@@ -165,16 +172,12 @@ $metadataservice = $ENV{'METADATAWS'} if ( exists $ENV{'METADATAWS'} );
 
 # Web service for SAC P&Z
 my $sacpzservice = "$servicebase/irisws/sacpz/1";
-# Until this service is migrated here is an override
-my $sacpzservice = "http://www.iris.edu/ws/sacpz";
 
 # Check for environment variable override for sacpzservice
 $sacpzservice = $ENV{'SACPZWS'} if ( exists $ENV{'SACPZWS'} );
 
 # Web service for RESP
 my $respservice = "$servicebase/irisws/resp/1";
-# Until this service is migrated here is an override
-my $respservice = "http://www.iris.edu/ws/resp";
 
 # Check for environment variable override for respservice
 $respservice = $ENV{'RESPWS'} if ( exists $ENV{'RESPWS'} );
@@ -210,12 +213,14 @@ my $outfile    = undef;
 my $sacpzdir   = undef;
 my $respdir    = undef;
 my $metafile   = undef;
+my $nometadata = undef;
 
 # Parse command line arguments
 Getopt::Long::Configure ("bundling_override");
 my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
                               'verbose|v+'     => \$verbose,
                               'nobs'           => \$nobsprint,
+                              'nometadata|nm'  => \$nometadata,
                               'net|N=s'        => \$net,
                               'sta|S=s'        => \$sta,
                               'loc|L=s'        => \$loc,
@@ -269,6 +274,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
   print " -msl length       Limit returned data to a minimum segment length\n";
   print " -lso              Limit returned data to the longest segment only\n";
+  print " -nm               Do not request metadata unless output file requested\n";
   print " -A appname        Application/version string for identification\n";
   print " -a user:pass      User and password for access to restricted data\n";
   print "\n";
@@ -394,11 +400,15 @@ my %request = (); # Value is metadata range for selection
 my @metadata = ();
 my $metadataxml;
 
-# Fetch metadata from the station web service if metadata output file has been
-# specified or if geographic range selection is requested.
+# Fetch metadata from the station web service by default unless the nometdata option
+# is specified or if metadata output file has been requested or if geographic range
+# selection is requested.
 # This processing will populate the request hash with entries matching metadata
-if ( $metafile || $sacpzdir || $respdir
-     || scalar @latrange || scalar @lonrange || scalar @degrange ) {
+
+$nometadata = undef if ( $metafile || $sacpzdir || $respdir
+			 || scalar @latrange || scalar @lonrange || scalar @degrange );
+
+if ( ! defined $nometadata )  {
   foreach my $selection ( @selections ) {
     my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
     &FetchMetaData($snet,$ssta,$sloc,$schan,$sstart,$send);
