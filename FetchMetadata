@@ -146,6 +146,10 @@
 # 2013.198
 #  - Add test for minimum version of LWP (libwww) module of 5.806.
 #
+# 2013.254
+#  - Allow validation of (virtual) network codes to contain a dash
+#  when parsing a BREQFAST file.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -157,7 +161,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2013.198";
+my $version  = "2013.254";
 
 my $scriptname = basename($0);
 
@@ -439,7 +443,7 @@ sub ReadBFastFile {
       print "Unrecognized station code: '$sta', skipping line $linecount\n" if ( $verbose );
       next;
     }
-    if ( $net !~ /^[_A-Za-z0-9*?]+$/ ) {
+    if ( $net !~ /^[-_A-Za-z0-9*?]+$/ ) {
       print "Unrecognized network code: '$net', skipping line $linecount\n" if ( $verbose );
       next;
     }
