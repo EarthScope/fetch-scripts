@@ -126,6 +126,11 @@
 # 2013.198
 #  - Add test for minimum version of LWP (libwww) module of 5.806.
 #
+# 2013.316
+#  - Allow latitude, longitude, depth, magnitude and geographic ranges
+#  to be specified with the value of 0.  Same treatment for the undocumented
+#  'limit' option.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -137,7 +142,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.198";
+my $version = "2013.316";
 
 my $scriptname = basename($0);
 
@@ -291,20 +296,20 @@ if ( $updatedafter ) {
 if ( scalar @latrange ) {
   @latrange = split (/:/, $latrange[0]);
 
-  if ( $latrange[0] && ($latrange[0] < -90.0 || $latrange[0] > 90.0) ) {
+  if ( defined $latrange[0] && ($latrange[0] < -90.0 || $latrange[0] > 90.0) ) {
     die "Minimum latitude out of range: $latrange[0]\n";
   }
-  if ( $latrange[1] && ($latrange[1] < -90.0 || $latrange[1] > 90.0) ) {
+  if ( defined $latrange[1] && ($latrange[1] < -90.0 || $latrange[1] > 90.0) ) {
     die "Maximum latitude out of range: $latrange[1]\n";
   }
 }
 if ( scalar @lonrange ) {
   @lonrange = split (/\:/, $lonrange[0]);
 
-  if ( $lonrange[0] && ($lonrange[0] < -180.0 || $lonrange[0] > 180.0) ) {
+  if ( defined $lonrange[0] && ($lonrange[0] < -180.0 || $lonrange[0] > 180.0) ) {
     die "Minimum longitude out of range: $lonrange[0]\n";
   }
-  if ( $lonrange[1] && ($lonrange[1] < -180.0 || $lonrange[1] > 180.0) ) {
+  if ( defined $lonrange[1] && ($lonrange[1] < -180.0 || $lonrange[1] > 180.0) ) {
     die "Maximum longitude out of range: $lonrange[1]\n";
   }
 }
@@ -314,40 +319,40 @@ if ( scalar @degrange ) {
   if ( scalar @degrange < 3 || scalar @degrange > 4 ) {
     die "Unrecognized radius specification: @degrange\n";
   }
-  if ( $degrange[0] && ($degrange[0] < -90.0 || $degrange[0] > 90.0) ) {
+  if ( defined $degrange[0] && ($degrange[0] < -90.0 || $degrange[0] > 90.0) ) {
     die "Radius latitude out of range: $degrange[0]\n";
   }
-  if ( $degrange[1] && ($degrange[1] < -180.0 || $degrange[1] > 180.0) ) {
+  if ( defined $degrange[1] && ($degrange[1] < -180.0 || $degrange[1] > 180.0) ) {
     die "Radius longitude out of range: $degrange[1]\n";
   }
 }
 if ( scalar @deprange ) {
   @deprange = split (/\:/, $deprange[0]);
 
-  if ( $deprange[0] && ($deprange[0] < -7000 || $deprange[0] > 7000) ) {
+  if ( defined $deprange[0] && ($deprange[0] < -7000 || $deprange[0] > 7000) ) {
     die "Minimum depth out of range: $deprange[0]\n";
   }
-  if ( $deprange[1] && ($deprange[1] < -7000 || $deprange[1] > 7000) ) {
+  if ( defined $deprange[1] && ($deprange[1] < -7000 || $deprange[1] > 7000) ) {
     die "Maximum depth out of range: $deprange[1]\n";
   }
 }
 if ( scalar @magrange ) {
   @magrange = split (/\:/, $magrange[0]);
 
-  if ( $magrange[0] && ($magrange[0] < -50 || $magrange[0] > 15) ) {
+  if ( defined $magrange[0] && ($magrange[0] < -50 || $magrange[0] > 15) ) {
     die "Minimum magnitude out of range: $magrange[0]\n";
   }
-  if ( $magrange[1] && ($magrange[1] < -50 || $magrange[1] > 15) ) {
+  if ( defined $magrange[1] && ($magrange[1] < -50 || $magrange[1] > 15) ) {
     die "Maximum magnitude out of range: $magrange[1]\n";
   }
 }
 if ( scalar @limitrange ) {
   @limitrange = split (/\:/, $limitrange[0]);
 
-  if ( $limitrange[0] && ($limitrange[0] < 1) ) {
+  if ( defined $limitrange[0] && ($limitrange[0] < 1) ) {
     die "Event limit out of range: $limitrange[0]\n";
   }
-  if ( $limitrange[1] && ($limitrange[1] < 0) ) {
+  if ( defined $limitrange[1] && ($limitrange[1] < 0) ) {
     die "Event count offset out of range: $limitrange[1]\n";
   }
 }
@@ -582,34 +587,34 @@ sub FetchEvents {
   $uri .= "&starttime=$starttime" if ( $starttime );
   $uri .= "&endtime=$endtime" if ( $endtime );
   if ( scalar @latrange ) {
-    $uri .= "&minlat=$latrange[0]" if ( $latrange[0] );
-    $uri .= "&maxlat=$latrange[1]" if ( $latrange[1] );
+    $uri .= "&minlat=$latrange[0]" if ( defined $latrange[0] );
+    $uri .= "&maxlat=$latrange[1]" if ( defined $latrange[1] );
   }
   if ( scalar @lonrange ) {
-    $uri .= "&minlon=$lonrange[0]" if ( $lonrange[0] );
-    $uri .= "&maxlon=$lonrange[1]" if ( $lonrange[1] );
+    $uri .= "&minlon=$lonrange[0]" if ( defined $lonrange[0] );
+    $uri .= "&maxlon=$lonrange[1]" if ( defined $lonrange[1] );
   }
   if ( scalar @degrange ) {
-    $uri .= "&lat=$degrange[0]" if ( $degrange[0] );
-    $uri .= "&lon=$degrange[1]" if ( $degrange[1] );
-    $uri .= "&maxradius=$degrange[2]" if ( $degrange[2] );
-    $uri .= "&minradius=$degrange[3]" if ( $degrange[3] );
+    $uri .= "&lat=$degrange[0]" if ( defined $degrange[0] );
+    $uri .= "&lon=$degrange[1]" if ( defined $degrange[1] );
+    $uri .= "&maxradius=$degrange[2]" if ( defined $degrange[2] );
+    $uri .= "&minradius=$degrange[3]" if ( defined $degrange[3] );
   }
   if ( scalar @deprange ) {
-    $uri .= "&mindepth=$deprange[0]" if ( $deprange[0] );
-    $uri .= "&maxdepth=$deprange[1]" if ( $deprange[1] );
+    $uri .= "&mindepth=$deprange[0]" if ( defined $deprange[0] );
+    $uri .= "&maxdepth=$deprange[1]" if ( defined $deprange[1] );
   }
   if ( scalar @magrange ) {
-    $uri .= "&minmag=$magrange[0]" if ( $magrange[0] );
-    $uri .= "&maxmag=$magrange[1]" if ( $magrange[1] );
+    $uri .= "&minmag=$magrange[0]" if ( defined $magrange[0] );
+    $uri .= "&maxmag=$magrange[1]" if ( defined $magrange[1] );
   }
   $uri .= "&magtype=$magtype" if ( $magtype );
   $uri .= "&catalog=$catalog" if ( $catalog );
   $uri .= "&contributor=$contributor" if ( $contributor );
   $uri .= "&updatedafter=$updatedafter" if ( $updatedafter );
   if ( scalar @limitrange ) {
-    $uri .= "&limit=$limitrange[0]" if ( $limitrange[0] );
-    $uri .= "&offset=$limitrange[1]" if ( $limitrange[1] );
+    $uri .= "&limit=$limitrange[0]" if ( defined $limitrange[0] );
+    $uri .= "&offset=$limitrange[1]" if ( defined $limitrange[1] );
   }
   $uri .= "&includeallorigins=true" if ( $allorigins );
   $uri .= "&includeallmagnitudes=true" if ( $allmags );
