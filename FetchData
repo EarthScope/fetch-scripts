@@ -137,6 +137,12 @@
 #  fetching of metadata when it is not strictly needed.
 #  - Remove lingering overrides to deprecated service locations.
 #
+# 2014.056
+#  - Allow gzip'ed HTTP encoding for metadata, SACPZ and RESP requests if
+#  support exists on the local system.
+#  - Add the -noretry option, when used the script will exit on time series
+#  request timeouts/errors with no retries.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -148,7 +154,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2013.212";
+my $version = "2014.056";
 
 my $scriptname = basename($0);
 
@@ -214,6 +220,16 @@ my $sacpzdir   = undef;
 my $respdir    = undef;
 my $metafile   = undef;
 my $nometadata = undef;
+my $noretry    = undef;
+
+my $inflater   = undef;
+
+# If Compress::Raw::Zlib is available configure inflater for RFC 1952 (gzip)
+if ( eval("use Compress::Raw::Zlib; 1") ) {
+  use Compress::Raw::Zlib;
+  $inflater = new Compress::Raw::Zlib::Inflate( -WindowBits => WANT_GZIP,
+                                                -ConsumeInput => 0 );
+}
 
 # Parse command line arguments
 Getopt::Long::Configure ("bundling_override");
@@ -221,6 +237,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
                               'verbose|v+'     => \$verbose,
                               'nobs'           => \$nobsprint,
                               'nometadata|nm'  => \$nometadata,
+                              'noretry|nr'     => \$noretry,
                               'net|N=s'        => \$net,
                               'sta|S=s'        => \$sta,
                               'loc|L=s'        => \$loc,
@@ -275,6 +292,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -msl length       Limit returned data to a minimum segment length\n";
   print " -lso              Limit returned data to the longest segment only\n";
   print " -nm               Do not request metadata unless output file requested\n";
+  print " -nr               No retry, exit immediately time series request errors\n";
   print " -A appname        Application/version string for identification\n";
   print " -a user:pass      User and password for access to restricted data\n";
   print "\n";
@@ -668,7 +686,7 @@ sub ReadBFastFile {
 #
 # The request list is separatated into groups where the group size is
 # defined in terms of station-days.  If the request for a group fails
- # it will be retried, after too many failures.
+# it will be retried, after too many failures.
 #
 ######################################################################
 sub FetchTimeSeriesData {
@@ -681,7 +699,11 @@ sub FetchTimeSeriesData {
 
   my $count = 0;
 
-  # Determine request data groups to avoid single large requests
+  # Determine request data groups to avoid single large requests,
+  # this is done for two reasons:
+  # 1) To facilitate re-starting of requests after broken connections
+  #    wihout needing re-submit the entire request
+  # 2) Avoid service timeouts
   my @grouprequest = ();
 
   my $groupdays = 0;
@@ -727,7 +749,7 @@ sub FetchTimeSeriesData {
   # Request each data group
   my $groupnum = 1;
   my $groupcnt = scalar @grouprequest;
-  my $redocnt = 0;
+  my $fetchcnt = 1;
   my $outoffset = 0;
   foreach my $groupref ( @grouprequest ) {
   REDOGROUP:
@@ -767,14 +789,17 @@ sub FetchTimeSeriesData {
       print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
 
+      # Exit immediately if we are not retrying
+      exit 1 if ( $noretry );
+
       # For real output files rewind position to the end of the last group data
       seek (OUT, $outoffset, 0) if ( $outfile ne "-" );
 
       # Retry in 10 seconds or give up if already tried 60 times.
-      if ( $response->code != 400 && $redocnt < 60 ) {
+      if ( $response->code != 400 && $fetchcnt < 60 ) {
 	print STDERR "Retrying request in 10 seconds\n";
 	sleep 10;
-	$redocnt++;
+	$fetchcnt++;
 	goto REDOGROUP;
       }
       else {
@@ -787,7 +812,7 @@ sub FetchTimeSeriesData {
     }
 
     # Get ready for next group
-    $redocnt = 0;
+    $fetchcnt = 1;
     $groupnum++;
     $outoffset = tell (OUT);
     $totalbytes += $datasize;
@@ -857,7 +882,11 @@ sub FetchSACPZ {
     $datasize = 0;
 
     # Fetch data from web service using callback routine
-    my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
+    my $response = ( $inflater ) ?
+      $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&DLCallBack ) :
+      $ua->get($uri, ':content_cb' => \&DLCallBack );
+
+    $inflater->inflateReset if ( $inflater );
 
     if ( $response->code == 404 || $response->code == 204 ) {
       print (STDERR "No data available\n") if ( $verbose );
@@ -944,7 +973,11 @@ sub FetchRESP {
     $datasize = 0;
 
     # Fetch data from web service using callback routine
-    my $response = $ua->get($uri, ':content_cb' => \&DLCallBack );
+    my $response = ( $inflater ) ?
+      $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&DLCallBack ) :
+      $ua->get($uri, ':content_cb' => \&DLCallBack );
+
+    $inflater->inflateReset if ( $inflater );
 
     if ( $response->code == 404 || $response->code == 204 ) {
       print (STDERR "No data available\n") if ( $verbose );
@@ -986,8 +1019,16 @@ sub FetchRESP {
 ######################################################################
 sub DLCallBack {
   my ($data, $response, $protocol) = @_;
-  print OUT $data;
   $datasize += length($data);
+
+  if ( $response->content_encoding() =~ /gzip/ ) {
+    my $datablock = "";
+    $inflater->inflate($data, $datablock);
+    print OUT $datablock;
+  }
+  else {
+    print OUT $data;
+  }
 
   if ( $verbose && ! $nobsprint ) {
     printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
@@ -1051,7 +1092,11 @@ sub FetchMetaData {
   $metadataxml = "";
 
   # Fetch metadata from web service using callback routine
-  my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
+  my $response = ( $inflater ) ?
+    $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&MDCallBack ) :
+    $ua->get($uri, ':content_cb' => \&MDCallBack );
+
+  $inflater->inflateReset if ( $inflater );
 
   if ( $response->code == 204 ) {
     print (STDERR "No data available\n") if ( $verbose );
@@ -1299,8 +1344,16 @@ sub FetchMetaData {
 ######################################################################
 sub MDCallBack {
   my ($data, $response, $protocol) = @_;
-  $metadataxml .= $data;
   $datasize += length($data);
+
+  if ( $response->content_encoding() =~ /gzip/ ) {
+    my $datablock = "";
+    $inflater->inflate($data, $datablock);
+    $metadataxml .= $datablock;
+  }
+  else {
+    $metadataxml .= $data;
+  }
 
   if ( $verbose && ! $nobsprint ) {
     printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
