@@ -150,6 +150,10 @@
 #  - Allow validation of (virtual) network codes to contain a dash
 #  when parsing a BREQFAST file.
 #
+# 2014.056
+#  - Allow gzip'ed HTTP encoding for metadata requests if support
+#  exists on the local system.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -161,7 +165,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version  = "2013.254";
+my $version = "2014.056";
 
 my $scriptname = basename($0);
 
@@ -199,6 +203,15 @@ my $appname      = undef;
 my $auth         = undef;
 my $outfile      = undef;
 my $xmlfile      = undef;
+
+my $inflater     = undef;
+
+# If Compress::Raw::Zlib is available configure inflater for RFC 1952 (gzip)
+if ( eval("use Compress::Raw::Zlib; 1") ) {
+  use Compress::Raw::Zlib;
+  $inflater = new Compress::Raw::Zlib::Inflate( -WindowBits => WANT_GZIP,
+                                                -ConsumeInput => 0 );
+}
 
 # Parse command line arguments
 Getopt::Long::Configure ("bundling_override");
@@ -585,7 +598,11 @@ sub FetchMetaData {
   $metadataxml = "";
 
   # Fetch metadata from web service using callback routine
-  my $response = $ua->get($uri, ':content_cb' => \&MDCallBack );
+  my $response = ( $inflater ) ?
+    $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&MDCallBack ) :
+    $ua->get($uri, ':content_cb' => \&MDCallBack );
+
+  $inflater->inflateReset if ( $inflater );
 
   if ( $response->code == 204 ) {
     print (STDERR "No data available\n") if ( $verbose );
@@ -918,8 +935,16 @@ sub FetchMetaData {
 ######################################################################
 sub MDCallBack {
   my ($data, $response, $protocol) = @_;
-  $metadataxml .= $data;
   $datasize += length($data);
+
+  if ( $response->content_encoding() =~ /gzip/ ) {
+    my $datablock = "";
+    $inflater->inflate($data, $datablock);
+    $metadataxml .= $datablock;
+  }
+  else {
+    $metadataxml .= $data;
+  }
 
   if ( $verbose && ! $nobsprint ) {
     printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
