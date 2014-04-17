@@ -143,8 +143,14 @@
 #  - Add the -noretry option, when used the script will exit on time series
 #  request timeouts/errors with no retries.
 #
-# 2014.083
+# 2014.084
 #  - Add -q option to make the script quiet except for errors.
+#  - Exit value will be 1 if any service requests failed.
+#
+# 2014.107
+#  - Instantiate new UserAgent client for each group when fetching time series
+#  instead of reusing the same client object.  This is to make sure no
+#  authentication details are shared between requests.
 #
 # Author: Chad Trabant, IRIS Data Management Center
 
@@ -157,7 +163,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.083";
+my $version = "2014.107";
 
 my $scriptname = basename($0);
 
@@ -199,8 +205,7 @@ my $groupstadays = 30;
 
 
 my $usage      = undef;
-my $verbose    = undef;
-my $quiet      = undef;
+my $verbose    = 0;
 my $nobsprint  = undef;
 
 my $net        = undef;
@@ -225,6 +230,7 @@ my $respdir    = undef;
 my $metafile   = undef;
 my $nometadata = undef;
 my $noretry    = undef;
+my $exitvalue  = 0;
 
 my $inflater   = undef;
 
@@ -239,7 +245,7 @@ if ( eval("use Compress::Raw::Zlib; 1") ) {
 Getopt::Long::Configure ("bundling_override");
 my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
                               'verbose|v+'     => \$verbose,
-                              'quiet|q'        => \$quiet,
+                              'quiet|q'        => sub { $verbose = -1; },
                               'nobs'           => \$nobsprint,
                               'nometadata|nm'  => \$nometadata,
                               'noretry|nr'     => \$noretry,
@@ -298,7 +304,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -msl length       Limit returned data to a minimum segment length\n";
   print " -lso              Limit returned data to the longest segment only\n";
   print " -nm               Do not request metadata unless output file requested\n";
-  print " -nr               No retry, exit immediately time series request errors\n";
+  print " -nr               No retry, exit immediately on time series request errors\n";
   print " -A appname        Application/version string for identification\n";
   print " -a user:pass      User and password for access to restricted data\n";
   print "\n";
@@ -315,7 +321,7 @@ if ( ! $outfile && ! $metafile && ! $sacpzdir && ! $respdir ) {
 }
 
 # Print script name and local time string
-if ( $verbose ) {
+if ( $verbose >= 1 ) {
   my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
   printf STDERR "$scriptname ($version) at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec;
 }
@@ -479,7 +485,7 @@ if ( $metafile ) {
     printf STDERR "No metdata available\n", scalar @metadata;
   }
   else {
-    printf STDERR "Writing metadata (%d channel epochs) file\n", scalar @metadata if ( $verbose );
+    printf STDERR "Writing metadata (%d channel epochs) file\n", scalar @metadata if ( $verbose >= 1 );
 
     open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
 
@@ -501,7 +507,9 @@ if ( $metafile ) {
 }
 
 my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
-printf (STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec) if ( ! $quiet );
+printf (STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec) if ( $verbose >= 0 );
+
+exit $exitvalue;
 ## End of main
 
 
@@ -580,67 +588,67 @@ sub ReadBFastFile {
 
     # Simple validation of BREQ FAST fields
     if ( $sta !~ /^[A-Za-z0-9*?]{1,5}$/ ) {
-      print "Unrecognized station code: '$sta', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized station code: '$sta', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $net !~ /^[-_A-Za-z0-9*?]+$/ ) {
-      print "Unrecognized network code: '$net', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized network code: '$net', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $syear !~ /^\d\d\d\d$/ ) {
-      print "Unrecognized start year: '$syear', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized start year: '$syear', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $smon !~ /^\d{1,2}$/ ) {
-      print "Unrecognized start month: '$smon', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized start month: '$smon', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $sday !~ /^\d{1,2}$/ ) {
-      print "Unrecognized start day: '$sday', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized start day: '$sday', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $shour !~ /^\d{1,2}$/ ) {
-      print "Unrecognized start hour: '$shour', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized start hour: '$shour', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $smin !~ /^\d{1,2}$/ ) {
-      print "Unrecognized start min: '$smin', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized start min: '$smin', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $ssec !~ /^\d{1,2}\.?\d{0,6}?$/ ) {
-      print "Unrecognized start seconds: '$ssec', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized start seconds: '$ssec', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $eyear !~ /^\d\d\d\d$/ ) {
-      print "Unrecognized end year: '$eyear', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized end year: '$eyear', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $emon !~ /^\d{1,2}$/ ) {
-      print "Unrecognized end month: '$emon', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized end month: '$emon', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $eday !~ /^\d{1,2}$/ ) {
-      print "Unrecognized end day: '$eday', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized end day: '$eday', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $ehour !~ /^\d{1,2}$/ ) {
-      print "Unrecognized end hour: '$ehour', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized end hour: '$ehour', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $emin !~ /^\d{1,2}$/ ) {
-      print "Unrecognized end min: '$emin', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized end min: '$emin', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $esec !~ /^\d{1,2}\.?\d{0,6}?$/ ) {
-      print "Unrecognized end seconds: '$esec', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized end seconds: '$esec', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( $count !~ /^\d+$/ || $count <= 0 ) {
-      print "Invalid channel count field: '$count', skipping line $linecount\n" if ( $verbose );
+      print "Invalid channel count field: '$count', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
     if ( scalar @chans <= 0 ) {
-      print "No channels specified, skipping line $linecount\n" if ( $verbose );
+      print "No channels specified, skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
 
@@ -649,20 +657,20 @@ sub ReadBFastFile {
     $loc = pop @chans if ( scalar @chans == ($count+1) );
 
     if ( $loc && $loc !~ /^[A-Za-z0-9*?\-]{1,2}$/ ) {
-      print "Unrecognized location ID: '$loc', skipping line $linecount\n" if ( $verbose );
+      print "Unrecognized location ID: '$loc', skipping line $linecount\n" if ( $verbose >= 1 );
       next;
     }
 
     foreach my $chan ( @chans ) {
       if ( $chan !~ /^[A-Za-z0-9*?]{3,3}$/ ) {
-	print "Unrecognized channel codes: '$chan', skipping line $linecount\n" if ( $verbose );
+	print "Unrecognized channel codes: '$chan', skipping line $linecount\n" if ( $verbose >= 1 );
 	next BFLINE;
       }
     }
 
     if ( scalar @chans != $count ) {
       printf "Channel count field ($count) does not match number of channels specified (%d), skipping line $linecount\n",
-	scalar @chans if ( $verbose );
+	scalar @chans if ( $verbose >= 1 );
       next;
     }
 
@@ -698,10 +706,6 @@ sub ReadBFastFile {
 sub FetchTimeSeriesData {
   # Open output file
   open (OUT, ">$outfile") || die "Cannot open output file '$outfile': $!\n";
-
-  # Create HTTP user agent
-  my $ua = RequestAgent->new();
-  $ua->env_proxy;
 
   my $count = 0;
 
@@ -748,7 +752,7 @@ sub FetchTimeSeriesData {
     return;
   }
 
-  print STDERR "Fetching time series data ($count selections)\n" if ( $verbose );
+  print STDERR "Fetching time series data ($count selections)\n" if ( $verbose >= 1 );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
@@ -775,22 +779,26 @@ sub FetchTimeSeriesData {
     print STDERR "Time series URI: '$uri'\n" if ( $verbose > 1 );
     print STDERR "Data selection (POST):\n$postdata" if ( $verbose > 1 );
 
-    print STDERR "Downloading time series data (group $groupnum of $groupcnt) :: " if ( $verbose );
+    print STDERR "Downloading time series data (group $groupnum of $groupcnt) :: " if ( $verbose >= 1 );
 
     $datasize = 0;
+
+    # Create HTTP user agent
+    my $ua = RequestAgent->new();
+    $ua->env_proxy;
 
     # Fetch time series data from web service using callback routine
     my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack );
 
     if ( $response->code == 204 ) {
-      print (STDERR "No data available\n") if ( $verbose );
+      print (STDERR "No data available\n") if ( $verbose >= 1 );
     }
     elsif ( $response->code == 401 ) {
       print (STDERR "AUTHORIZATION FAILED, username and password not recognized\n");
       last;
     }
     elsif ( ! $response->is_success() ) {
-      print (STDERR "Error fetching data: "
+      print (STDERR "Error fetching time series data: "
 	     . $response->code . " :: " . status_message($response->code) . "\n");
       print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
@@ -814,7 +822,7 @@ sub FetchTimeSeriesData {
       }
     }
     else {
-      printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
+      printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose >= 1 );
     }
 
     # Get ready for next group
@@ -829,7 +837,7 @@ sub FetchTimeSeriesData {
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $totalbytes/(($duration)?$duration:0.000001);
   printf (STDERR "Received %s of time series data in %.1f seconds (%s/s)\n",
-	  sizestring($totalbytes), $duration, sizestring($rate)) if ( ! $quiet );
+	  sizestring($totalbytes), $duration, sizestring($rate)) if ( $verbose >= 0 );
 
   # Remove empty file
   unlink $outfile if ( -z $outfile );
@@ -853,7 +861,7 @@ sub FetchSACPZ {
   my $total = 0;
   foreach my $req ( keys %request ) { $total++ if ( defined $request{$req} ); }
 
-  print STDERR "Fetching SAC Poles and Zeros\n" if ( $verbose );
+  print STDERR "Fetching SAC Poles and Zeros\n" if ( $verbose >= 1 );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
@@ -883,7 +891,7 @@ sub FetchSACPZ {
 
     print STDERR "SAC-PZ URI: '$uri'\n" if ( $verbose > 1 );
 
-    print STDERR "Downloading $sacpzfile ($count/$total) :: " if ( $verbose );
+    print STDERR "Downloading $sacpzfile ($count/$total) :: " if ( $verbose >= 1 );
 
     $datasize = 0;
 
@@ -895,16 +903,18 @@ sub FetchSACPZ {
     $inflater->inflateReset if ( $inflater );
 
     if ( $response->code == 404 || $response->code == 204 ) {
-      print (STDERR "No data available\n") if ( $verbose );
+      print (STDERR "No data available\n") if ( $verbose >= 1 );
     }
     elsif ( ! $response->is_success() ) {
-      print (STDERR "Error fetching data: "
+      print (STDERR "Error fetching SAC PZ data: "
 	     . $response->code . " :: " . status_message($response->code) . "\n");
       print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+
+      $exitvalue = 1;
     }
     else {
-      printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
+      printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose >= 1 );
     }
 
     # Add data bytes to global total
@@ -919,7 +929,7 @@ sub FetchSACPZ {
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $totalbytes/(($duration)?$duration:0.000001);
   printf (STDERR "Received %s of SAC P&Zs in %.1f seconds (%s/s)\n",
-	  sizestring($totalbytes), $duration, sizestring($rate)) if ( ! $quiet );
+	  sizestring($totalbytes), $duration, sizestring($rate)) if ( $verbose >= 0 );
 
 } # End of FetchSACPZ
 
@@ -941,7 +951,7 @@ sub FetchRESP {
   my $total = 0;
   foreach my $req ( keys %request ) { $total++ if ( defined $request{$req} ); }
 
-  print STDERR "Fetching RESP\n" if ( $verbose );
+  print STDERR "Fetching RESP\n" if ( $verbose >= 1 );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
@@ -974,7 +984,7 @@ sub FetchRESP {
 
     print STDERR "RESP URI: '$uri'\n" if ( $verbose > 1 );
 
-    print STDERR "Downloading $respfile ($count/$total) :: " if ( $verbose );
+    print STDERR "Downloading $respfile ($count/$total) :: " if ( $verbose >= 1 );
 
     $datasize = 0;
 
@@ -986,16 +996,18 @@ sub FetchRESP {
     $inflater->inflateReset if ( $inflater );
 
     if ( $response->code == 404 || $response->code == 204 ) {
-      print (STDERR "No data available\n") if ( $verbose );
+      print (STDERR "No data available\n") if ( $verbose >= 1 );
     }
     elsif ( ! $response->is_success() ) {
-      print (STDERR "Error fetching data: "
+      print (STDERR "Error fetching RESP data: "
 	     . $response->code . " :: " . status_message($response->code) . "\n");
       print STDERR "------\n" . $response->decoded_content . "\n------\n";
       print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+
+      $exitvalue = 1;
     }
     else {
-      printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
+      printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose >= 1 );
     }
 
     # Add data bytes to global total
@@ -1010,7 +1022,7 @@ sub FetchRESP {
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $totalbytes/(($duration)?$duration:0.000001);
   printf (STDERR "Received %s of RESP in %.1f seconds (%s/s)\n",
-	  sizestring($totalbytes), $duration, sizestring($rate)) if ( ! $quiet );
+	  sizestring($totalbytes), $duration, sizestring($rate)) if ( $verbose >= 0 );
 
 } # End of FetchRESP
 
@@ -1036,7 +1048,7 @@ sub DLCallBack {
     print OUT $data;
   }
 
-  if ( $verbose && ! $nobsprint ) {
+  if ( $verbose >= 1 && ! $nobsprint ) {
     printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
   }
 }
@@ -1090,9 +1102,9 @@ sub FetchMetaData {
 
   my $ftime = Time::HiRes::time;
 
-  print STDERR "Metadata URI: '$uri'\n" if ( $verbose > 1 );
+  print STDERR "Metadata URI: '$uri'\n" if ( $verbose >= 2 );
 
-  print STDERR "Fetching metadata :: " if ( $verbose );
+  print STDERR "Fetching metadata :: " if ( $verbose >= 1 );
 
   $datasize = 0;
   $metadataxml = "";
@@ -1105,23 +1117,25 @@ sub FetchMetaData {
   $inflater->inflateReset if ( $inflater );
 
   if ( $response->code == 204 ) {
-    print (STDERR "No data available\n") if ( $verbose );
+    print (STDERR "No data available\n") if ( $verbose >= 1 );
     return;
   }
   elsif ( ! $response->is_success() ) {
-    print (STDERR "Error fetching data: "
+    print (STDERR "Error fetching metadata: "
 	   . $response->code . " :: " . status_message($response->code) . "\n");
     print STDERR "------\n" . $response->decoded_content . "\n------\n";
-    print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+    print STDERR "  URI: '$uri'\n" if ( $verbose >= 2 );
+
+    $exitvalue = 1;
   }
   else {
-    printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
+    printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose >= 1 );
   }
 
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $datasize/(($duration)?$duration:0.000001);
   printf (STDERR "Received %s of metadata in %.1f seconds (%s/s)\n",
-	  sizestring($datasize), $duration, sizestring($rate)) if ( ! $quiet );
+	  sizestring($datasize), $duration, sizestring($rate)) if ( $verbose >= 0 );
 
   # Return if no metadata received
   return if ( length $metadataxml <= 0 );
@@ -1134,7 +1148,7 @@ sub FetchMetaData {
 
   my $ptime = Time::HiRes::time;
 
-  print STDERR "Parsing XML metadata... " if ( $verbose );
+  print STDERR "Parsing XML metadata... " if ( $verbose >= 1 );
 
   # Open file to store metadata XML
   my $metadataxmlfile = "metadata-$$.xml";
@@ -1153,18 +1167,18 @@ sub FetchMetaData {
   }
   # Otherwise parse the XML in memory
   else {
-    printf STDERR " in memory (possibly slow), " if ( $verbose );
+    printf STDERR " in memory (possibly slow), " if ( $verbose >= 1 );
 
     # Parse XML metadata from string
     $parser->parse_string ($metadataxml);
   }
 
-  printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose );
+  printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose >= 1 );
 
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $datasize/(($duration)?$duration:0.000001);
   printf (STDERR "Processed metadata for $totalepochs channel epochs in %.1f seconds (%s/s)\n",
-	  $duration, sizestring($rate)) if ( ! $quiet );
+	  $duration, sizestring($rate)) if ( $verbose >= 0 );
 
   ## End of this routine, below is the XML parsing handler used above
 
@@ -1361,7 +1375,7 @@ sub MDCallBack {
     $metadataxml .= $data;
   }
 
-  if ( $verbose && ! $nobsprint ) {
+  if ( $verbose >= 1 && ! $nobsprint ) {
     printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
   }
 }
