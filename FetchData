@@ -163,7 +163,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.107";
+my $version = "2014.128";
 
 my $scriptname = basename($0);
 
@@ -428,7 +428,7 @@ if ( ! scalar @selections && (scalar @latrange || scalar @lonrange || scalar @de
 # An array to hold channel list and metadata
 my %request = (); # Value is metadata range for selection
 my @metadata = ();
-my $metadataxml;
+my $metadataresp;
 
 # Fetch metadata from the station web service by default unless the nometdata option
 # is specified or if metadata output file has been requested or if geographic range
@@ -438,13 +438,12 @@ my $metadataxml;
 $nometadata = undef if ( $metafile || $sacpzdir || $respdir
 			 || scalar @latrange || scalar @lonrange || scalar @degrange );
 
+
+# Fetch metadata unless requested not to
 if ( ! defined $nometadata )  {
-  foreach my $selection ( @selections ) {
-    my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
-    &FetchMetaData($snet,$ssta,$sloc,$schan,$sstart,$send);
-  }
+  &FetchMetaData();
 }
-# Build request hash directly from selections
+# Build request hash directly from selections if not fetching metadata
 else {
   foreach my $selection ( @selections ) {
     my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
@@ -1070,54 +1069,82 @@ sub DLCallBack {
 #
 ######################################################################
 sub FetchMetaData {
-  # These our declared with a wider scope for use in the enclosed package
-  our ($rnet,$rsta,$rloc,$rchan,$rstart,$rend) = @_;
-
   # Create HTTP user agent
   my $ua = RequestAgent->new();
   $ua->env_proxy;
 
   # Create web service URI
-  my $uri = "${metadataservice}/query?level=channel";
-  $uri .= "&network=$rnet" if ( $rnet );
-  $uri .= "&station=$rsta" if ( $rsta );
-  $uri .= "&location=$rloc" if ( $rloc );
-  $uri .= "&channel=$rchan" if ( $rchan );
-  $uri .= "&starttime=$rstart" if ( $rstart );
-  $uri .= "&endtime=$rend" if ( $rend );
+  my $uri = "${metadataservice}/query";
+
+  # Create POST data selection: specify options followed by selections
+  my $postdata = "level=channel\n";
+  $postdata .= "format=text\n";
+
   if ( scalar @latrange ) {
-    $uri .= "&minlat=$latrange[0]" if ( defined $latrange[0] );
-    $uri .= "&maxlat=$latrange[1]" if ( defined $latrange[1] );
+    $postdata .= "minlatitude=$latrange[0]" if ( defined $latrange[0] );
+    $postdata .= "maxlatitude=$latrange[1]" if ( defined $latrange[1] );
   }
   if ( scalar @lonrange ) {
-    $uri .= "&minlon=$lonrange[0]" if ( defined $lonrange[0] );
-    $uri .= "&maxlon=$lonrange[1]" if ( defined $lonrange[1] );
+    $postdata .= "minlongitude=$lonrange[0]" if ( defined $lonrange[0] );
+    $postdata .= "maxlongitude=$lonrange[1]" if ( defined $lonrange[1] );
   }
   if ( scalar @degrange ) {
-    $uri .= "&lat=$degrange[0]" if ( defined $degrange[0] );
-    $uri .= "&lon=$degrange[1]" if ( defined $degrange[1] );
-    $uri .= "&maxradius=$degrange[2]" if ( defined $degrange[2] );
-    $uri .= "&minradius=$degrange[3]" if ( defined $degrange[3] );
+    $postdata .= "latitude=$degrange[0]" if ( defined $degrange[0] );
+    $postdata .= "longitude=$degrange[1]" if ( defined $degrange[1] );
+    $postdata .= "maxradius=$degrange[2]" if ( defined $degrange[2] );
+    $postdata .= "minradius=$degrange[3]" if ( defined $degrange[3] );
   }
+
+  my %selectmatch = ();
+
+  # Translate selections to POST body repeat lines and build selection hash for matching
+  foreach my $selection ( @selections ) {
+    my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
+
+    # Subsitute non-specified fields with wildcards
+    $snet = "*" if ( ! $snet );
+    $ssta = "*" if ( ! $ssta );
+    $sloc = "*" if ( ! $sloc );
+    $schan = "*" if ( ! $schan );
+    my $pstart = ( $sstart ) ? $sstart : "*";
+    my $pend = ( $send ) ? $send : "*";
+
+    # Add line to POST body for this selection
+    $postdata .= "$snet $ssta $sloc $schan $pstart $pend\n";
+
+    # Create key and convert simple globbing wildcards to regex
+    my $key = "${snet}_${ssta}_${sloc}_${schan}";
+    $key =~ s/\*/\.\*/g;  # '*' => '.*'
+    $key =~ s/\?/\./g;    # '?' => '.'
+
+    my $kstart = ( $sstart ) ? str2time ($sstart) : undef;
+    my $kend = ( $send ) ? str2time ($send): undef;
+
+    # Add entry to selection matching hash
+    $selectmatch{$key}{"$kstart|$kend"} = "$sstart|$send";
+  }
+
+#CHAD, if no selections add * * * * * * entry
 
   my $ftime = Time::HiRes::time;
 
   print STDERR "Metadata URI: '$uri'\n" if ( $verbose >= 2 );
+  print STDERR "Metadata selection (POST):\n$postdata" if ( $verbose > 1 );
 
   print STDERR "Fetching metadata :: " if ( $verbose >= 1 );
 
   $datasize = 0;
-  $metadataxml = "";
+  $metadataresp = "";
 
   # Fetch metadata from web service using callback routine
   my $response = ( $inflater ) ?
-    $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&MDCallBack ) :
-    $ua->get($uri, ':content_cb' => \&MDCallBack );
+    $ua->post($uri, 'Accept-Encoding' => 'gzip', Content => $postdata, ':content_cb' => \&MDCallBack ) :
+    $ua->post($uri, Content => $postdata, ':content_cb' => \&MDCallBack );
 
   $inflater->inflateReset if ( $inflater );
 
   if ( $response->code == 204 ) {
-    print (STDERR "No data available\n") if ( $verbose >= 1 );
+    print (STDERR "No metadata available\n") if ( $verbose >= 1 );
     return;
   }
   elsif ( ! $response->is_success() ) {
@@ -1138,39 +1165,82 @@ sub FetchMetaData {
 	  sizestring($datasize), $duration, sizestring($rate)) if ( $verbose >= 0 );
 
   # Return if no metadata received
-  return if ( length $metadataxml <= 0 );
-
-  # Create stream oriented XML parser instance
-  use XML::SAX;
-  my $parser = new XML::SAX::ParserFactory->parser( Handler => MDSHandler->new );
+  return if ( length $metadataresp <= 0 );
 
   my $totalepochs = 0;
-
   my $ptime = Time::HiRes::time;
 
-  print STDERR "Parsing XML metadata... " if ( $verbose >= 1 );
+  print STDERR "Parsing metadata... " if ( $verbose >= 1 );
 
-  # Open file to store metadata XML
-  my $metadataxmlfile = "metadata-$$.xml";
-  if ( open (MXML, ">$metadataxmlfile") ) {
-    # Write XML and close file
-    print MXML $metadataxml;
-    close MXML;
+  # Loop through each metadata return line and do the following:
+  #  1) insert into metadata storage list
+  #  2) search for matching user selection entries and
+  #     a) create request hash entries for each selection that matches using the
+  #        original request time window.
+  #     b) track the largest combined metadata time window for each request
+  foreach my $line ( split (/[\n\r]+/, $metadataresp) ) {
+    chomp $line;
+    next if ( $line =~ /^#.*/ );  # Skip comment lines beginning with '#'
 
-    # Parse XML metadata from file
-    $parser->parse_file ($metadataxmlfile);
+    my ($mnet,$msta,$mloc,$mchan,$mlat,$mlon,$melev,$mdepth,$mazimuth,$mdip,$minstrument,
+	$mscale,$mscalefreq,$mscaleunits,$msamplerate,$mstart,$mend) = split(/\|/, $line);
 
-    # Remove temporary XML metadata file
-    if ( ! unlink $metadataxmlfile ) {
-      print STDERR "Cannot remove temporary XML metadata file: $!\n";
+    # Translate metadata location ID to "--" if it's spaces
+    $mloc = "--" if ( $mloc eq "  " );
+
+    # Track epoch count
+    $totalepochs++;
+
+    # Push channel epoch metadata into storage list
+    push (@metadata, "$mnet|$msta|$mloc|$mchan|$mstart|$mend|$mlat|$mlon|$melev|$mdepth|$mazimuth|$mdip|$minstrument|$msamplerate|$mscale|$mscalefreq|$mscaleunits");
+
+    # Cleanup start and end strings, with truncation to 2038-01-01T00:00:00 for older Perls
+    my ($y,$mo,$d,$h,$m,$s) = $mstart =~ /^(\d{4,4})[-\/,:](\d{1,2})[-\/,:](\d{1,2})[-\/,:T](\d{1,2})[-\/,:](\d{1,2})[-\/,:](\d{1,2}).*/;
+    my $cstart = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
+    my ($y,$mo,$d,$h,$m,$s) = $mend   =~ /^(\d{4,4})[-\/,:](\d{1,2})[-\/,:](\d{1,2})[-\/,:T](\d{1,2})[-\/,:](\d{1,2})[-\/,:](\d{1,2}).*/;
+    my $cend =   ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
+
+    my $cstart = str2time ($cstart);
+    my $cend = str2time ($cend);
+
+    # Match metadata to selections (requests)
+    foreach my $key ( keys %selectmatch ) {
+
+      # Skip non-matching entries
+      next if "${mnet}_${msta}_${mloc}_${mchan}" !~ /^$key$/;
+
+      # Check for time overlap (intersection) with metadata
+      foreach my $timekey ( keys %{$selectmatch{$key}} ) {
+	my ($kstart,$kend) = split (/\|/, $timekey);
+
+	# If time ranges intersect add to request hash
+	if ( $cstart <= $kend && $cend >= $kstart ) {
+	  my ($sstart,$send) = split (/\|/, $selectmatch{$key}{$timekey});
+	  my $rkey = "$mnet|$msta|$mloc|$mchan|$sstart|$send";
+
+	  # Add entry to request hash with value of matching metadata
+	  $request{$rkey} = "$mstart|$mend";
+
+	  # CHAD, need to track widest metadata for NSLC and change RESP and SACPZ to use this.
+	}
+      }
     }
-  }
-  # Otherwise parse the XML in memory
-  else {
-    printf STDERR " in memory (possibly slow), " if ( $verbose >= 1 );
 
-    # Parse XML metadata from string
-    $parser->parse_string ($metadataxml);
+    # Old part of widest metadata window tracking below
+
+    # # Put entry into request hash, value is the widest range of channel epochs
+    # if ( ! exists  $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} ) {
+    # 	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$mstart|$mend";
+    # }
+    # else {
+    # 	# Track widest metadata start and end range
+    # 	my ($vstart,$vend) = split (/\|/, $request{"$net|$sta|$dloc|$chan|$rstart|$rend"});
+    # 	my $startepoch = str2time ($mstart);
+    # 	my $endepoch = str2time ($mend);
+    # 	$vstart = $mstart if ( $startepoch < str2time ($vstart) );
+    # 	$vend = $mend if ( $endepoch > str2time ($vend) );
+    # 	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$vstart|$vend";
+    # }
   }
 
   printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose >= 1 );
@@ -1180,177 +1250,6 @@ sub FetchMetaData {
   printf (STDERR "Processed metadata for $totalepochs channel epochs in %.1f seconds (%s/s)\n",
 	  $duration, sizestring($rate)) if ( $verbose >= 0 );
 
-  ## End of this routine, below is the XML parsing handler used above
-
-  ## Beginning of SAX MDSHandler, event-based streaming XML parsing
-  package MDSHandler;
-  use base qw(XML::SAX::Base);
-  use HTTP::Date;
-
-  my $inchannel = 0;
-  my $inlat = 0;
-  my $inlon = 0;
-  my $inelevation = 0;
-  my $indepth = 0;
-  my $inazimuth = 0;
-  my $indip = 0;
-  my $insensor = 0;
-  my $insensortype = 0;
-  my $insamplerate = 0;
-
-  my $ininstsens = 0;
-  my $insensvalue = 0;
-  my $insensfreq = 0;
-  my $ininputunits = 0;
-  my $inunitname = 0;
-
-  my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 17;
-
-  sub start_element {
-    my ($self,$element) = @_;
-
-    if ( $element->{Name} eq "Network" ) {
-      $net = $element->{Attributes}->{'{}code'}->{Value};
-    }
-
-    elsif ( $element->{Name} eq "Station" ) {
-      ($sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 16;
-
-      $sta = $element->{Attributes}->{'{}code'}->{Value};
-    }
-
-    elsif ( $element->{Name} eq "Channel" ) {
-      $loc = $element->{Attributes}->{'{}locationCode'}->{Value};
-      $chan = $element->{Attributes}->{'{}code'}->{Value};
-      $start = $element->{Attributes}->{'{}startDate'}->{Value};
-      $end = $element->{Attributes}->{'{}endDate'}->{Value};
-      $inchannel = 1;
-    }
-
-    if ( $inchannel ) {
-      if ( $element->{Name} eq "Latitude" ) { $inlat = 1; }
-      elsif ( $element->{Name} eq "Longitude" ) { $inlon = 1; }
-      elsif ( $element->{Name} eq "Elevation" ) { $inelevation = 1; }
-      elsif ( $element->{Name} eq "Depth" ) { $indepth = 1; }
-      elsif ( $element->{Name} eq "Azimuth" ) { $inazimuth = 1; }
-      elsif ( $element->{Name} eq "Dip" ) { $indip = 1; }
-      elsif ( $element->{Name} eq "SampleRate" ) { $insamplerate = 1; }
-      elsif ( $element->{Name} eq "Sensor" ) { $insensor = 1; }
-      elsif ( $element->{Name} eq "InstrumentSensitivity" ) { $ininstsens = 1; }
-    }
-
-    if ( $insensor ) {
-      if ( $element->{Name} eq "Type" ) { $insensortype = 1; }
-    }
-
-    if ( $ininstsens ) {
-      if ( $element->{Name} eq "Value" ) { $insensvalue = 1; }
-      elsif ( $element->{Name} eq "Frequency" ) { $insensfreq = 1; }
-      elsif ( $element->{Name} eq "InputUnits" ) { $ininputunits = 1; }
-    }
-
-    if ( $ininputunits ) {
-      if ( $element->{Name} eq "Name" ) { $inunitname = 1; }
-    }
-  }
-
-  sub end_element {
-    my ($self,$element) = @_;
-
-    if ( $element->{Name} eq "Network" ) {
-      $net = 0;
-    }
-
-    elsif ( $element->{Name} eq "Station" ) {
-      $sta = 0;
-    }
-
-    elsif ( $element->{Name} eq "Channel" ) {
-      # Track epoch count
-      $totalepochs++;
-
-      # Translate metadata location ID to "--" if it's spaces
-      my $dloc = ( $loc eq "  " ) ? "--" : $loc;
-
-      # Remove newlines, returns and trailing spaces in metadata instrument name
-      $instrument =~ s/[\n\r]//g;
-      $instrument =~ s/\s*$//g;
-
-      # Cleanup start and end strings, with truncation to 2038-01-01T00:00:00 for older Perls
-      my ($y,$mo,$d,$h,$m,$s) = $start =~ /^(\d{4,4})[-\/,:](\d{1,2})[-\/,:](\d{1,2})[-\/,:T](\d{1,2})[-\/,:](\d{1,2})[-\/,:](\d{1,2}).*/;
-      my $mstart = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
-      my ($y,$mo,$d,$h,$m,$s) = $end   =~ /^(\d{4,4})[-\/,:](\d{1,2})[-\/,:](\d{1,2})[-\/,:T](\d{1,2})[-\/,:](\d{1,2})[-\/,:](\d{1,2}).*/;
-      my $mend =   ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
-
-      # Push channel epoch metadata into storage array
-      push (@metadata, "$net|$sta|$dloc|$chan|$start|$end|$lat|$lon|$elev|$depth|$azimuth|$dip|$instrument|$samplerate|$sens|$sensfreq|$sensunit");
-
-      # Put entry into request hash, value is the widest range of channel epochs
-      if ( ! exists  $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} ) {
-	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$mstart|$mend";
-      }
-      else {
-	# Track widest metadata start and end range
-	my ($vstart,$vend) = split (/\|/, $request{"$net|$sta|$dloc|$chan|$rstart|$rend"});
-	my $startepoch = str2time ($mstart);
-	my $endepoch = str2time ($mend);
-	$vstart = $mstart if ( $startepoch < str2time ($vstart) );
-	$vend = $mend if ( $endepoch > str2time ($vend) );
-	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$vstart|$vend";
-      }
-
-      # Reset Channel level fields
-      ($loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) = (undef) x 15;
-
-      $inchannel = 0;
-    }
-
-    if ( $inchannel ) {
-      if ( $element->{Name} eq "Latitude" ) { $inlat = 0; }
-      elsif ( $element->{Name} eq "Longitude" ) { $inlon = 0; }
-      elsif ( $element->{Name} eq "Elevation" ) { $inelevation = 0; }
-      elsif ( $element->{Name} eq "Depth" ) { $indepth = 0; }
-      elsif ( $element->{Name} eq "Azimuth" ) { $inazimuth = 0; }
-      elsif ( $element->{Name} eq "Dip" ) { $indip = 0; }
-      elsif ( $element->{Name} eq "SampleRate" ) { $insamplerate = 0; }
-      elsif ( $element->{Name} eq "Sensor" ) { $insensor = 0; }
-      elsif ( $element->{Name} eq "InstrumentSensitivity" ) { $ininstsens = 0; }
-    }
-
-    if ( $insensor ) {
-      if ( $element->{Name} eq "Type" ) { $insensortype = 0; }
-    }
-
-    if ( $ininstsens ) {
-      if ( $element->{Name} eq "Value" ) { $insensvalue = 0; }
-      elsif ( $element->{Name} eq "Frequency" ) { $insensfreq = 0; }
-      elsif ( $element->{Name} eq "InputUnits" ) { $ininputunits = 0; }
-    }
-
-    if ( $ininputunits ) {
-      if ( $element->{Name} eq "Name" ) { $inunitname = 0; }
-    }
-  }
-
-  sub characters {
-    my ($self,$element) = @_;
-
-    if ( defined $element->{Data} ) {
-      if ( $inlat ) { $lat .= $element->{Data}; }
-      elsif ( $inlon ) { $lon .= $element->{Data}; }
-      elsif ( $inelevation ) { $elev .= $element->{Data}; }
-      elsif ( $indepth ) { $depth .= $element->{Data}; }
-      elsif ( $inazimuth ) { $azimuth .= $element->{Data}; }
-      elsif ( $indip ) { $dip .= $element->{Data}; }
-      elsif ( $insamplerate ) { $samplerate .= $element->{Data}; }
-
-      elsif ( $insensortype ) { $instrument .= $element->{Data}; }
-
-      elsif ( $insensvalue ) { $sens .= $element->{Data}; }
-      elsif ( $insensfreq ) { $sensfreq .= $element->{Data}; }
-      elsif ( $inunitname ) { $sensunit .= $element->{Data}; }
-    }
-  } # End of SAX MDSHandler
 } # End of FetchMetaData()
 
 
@@ -1359,7 +1258,7 @@ sub FetchMetaData {
 #
 # A call back for LWP downloading of metadata.
 #
-# Add received data to metadataxml string, tally up the received data
+# Add received data to metadataresp string, tally up the received data
 # size and print and updated (overwriting) byte count string.
 ######################################################################
 sub MDCallBack {
@@ -1369,10 +1268,10 @@ sub MDCallBack {
   if ( $response->content_encoding() =~ /gzip/ ) {
     my $datablock = "";
     $inflater->inflate($data, $datablock);
-    $metadataxml .= $datablock;
+    $metadataresp .= $datablock;
   }
   else {
-    $metadataxml .= $data;
+    $metadataresp .= $data;
   }
 
   if ( $verbose >= 1 && ! $nobsprint ) {
@@ -1458,4 +1357,3 @@ BEGIN {
       }
     }
 } # End of LWP::UserAgent override
-
