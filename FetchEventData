@@ -2,16 +2,16 @@
 #
 # FetchEventData
 #
-# Find the most current version at http://www.iris.edu/ws/wsclients/
+# Find the most current version at http://service.iris.edu/clients/
 #
-# Fetch event parameters from the DMC web interfaces.
+# Fetch selected event parameters and event-windowed time series data
+# from the DMC web service interfaces.
 #
 # Dependencies: This script should run without problems on Perl
 # release 5.10 or newer, older versions of Perl might require the
 # installation of the following modules (and their dependencies):
 #   Bundle::LWP (libwww-perl)
 #
-
 #
 # ## Change history ##
 #

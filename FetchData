@@ -426,7 +426,8 @@ if ( ! scalar @selections && (scalar @latrange || scalar @lonrange || scalar @de
 }
 
 # An array to hold channel list and metadata
-my %request = (); # Value is metadata range for selection
+my %request = ();     # Value is metadata epoch for data selection
+my %metarequest = (); # Value is metadata range for RESP and SACPZ selection
 my @metadata = ();
 my $metadataresp;
 
@@ -858,19 +859,20 @@ sub FetchSACPZ {
 
   my $count = 0;
   my $total = 0;
-  foreach my $req ( keys %request ) { $total++ if ( defined $request{$req} ); }
+  foreach my $req ( keys %metarequest ) { $total++ if ( defined $metarequest{$req} ); }
 
   print STDERR "Fetching SAC Poles and Zeros\n" if ( $verbose >= 1 );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
-  foreach my $req ( sort keys %request ) {
-    # Skip entries with values not set, perhaps no data was fetched
-    next if ( ! defined $request{$req} );
+  foreach my $req ( sort keys %metarequest ) {
 
-    my ($rnet,$rsta,$rloc,$rchan,$rstart,$rend) = split (/\|/, $req);
-    my ($mstart,$mend) = split (/\|/, $request{$req});
+    my ($rnet,$rsta,$rloc,$rchan) = split (/\|/, $req);
+    my ($mstart,$mend) = split (/\|/, $metarequest{$req});
     $count++;
+
+    #CHAD, convert metarequest values to time strings...
+    &mktimestring
 
     # Generate output file name and open
     my $sacpzfile = "$sacpzdir/SACPZ.$rnet.$rsta.$rloc.$rchan";
@@ -1124,8 +1126,6 @@ sub FetchMetaData {
     $selectmatch{$key}{"$kstart|$kend"} = "$sstart|$send";
   }
 
-#CHAD, if no selections add * * * * * * entry
-
   my $ftime = Time::HiRes::time;
 
   print STDERR "Metadata URI: '$uri'\n" if ( $verbose >= 2 );
@@ -1216,31 +1216,25 @@ sub FetchMetaData {
 	# If time ranges intersect add to request hash
 	if ( $cstart <= $kend && $cend >= $kstart ) {
 	  my ($sstart,$send) = split (/\|/, $selectmatch{$key}{$timekey});
-	  my $rkey = "$mnet|$msta|$mloc|$mchan|$sstart|$send";
 
 	  # Add entry to request hash with value of matching metadata
-	  $request{$rkey} = "$mstart|$mend";
+	  $request{"$mnet|$msta|$mloc|$mchan|$sstart|$send"} = "$mstart|$mend";
 
-	  # CHAD, need to track widest metadata for NSLC and change RESP and SACPZ to use this.
+	  # Track widest metadata range for NSLC for SACPZ and RESP requests
+	  if ( ! exists $metarequest{"$mnet|$msta|$mloc|$mchan"} ) {
+	    $metarequest{"$mnet|$msta|$mloc|$mchan"} = "$cstart|$cend";
+	  }
+	  else {
+	    my ($vstart,$vend) = split (/\|/, $metarequest{"$mnet|$msta|$mloc|$mchan"});
+
+	    $vstart = $cstart if ( $cstart < $vstart );
+	    $vend = $cend if ( $cend > $vend );
+
+	    $metarequest{"$mnet|$msta|$mloc|$mchan"} = "$vstart|$vend";
+	  }
 	}
       }
     }
-
-    # Old part of widest metadata window tracking below
-
-    # # Put entry into request hash, value is the widest range of channel epochs
-    # if ( ! exists  $request{"$net|$sta|$dloc|$chan|$rstart|$rend"} ) {
-    # 	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$mstart|$mend";
-    # }
-    # else {
-    # 	# Track widest metadata start and end range
-    # 	my ($vstart,$vend) = split (/\|/, $request{"$net|$sta|$dloc|$chan|$rstart|$rend"});
-    # 	my $startepoch = str2time ($mstart);
-    # 	my $endepoch = str2time ($mend);
-    # 	$vstart = $mstart if ( $startepoch < str2time ($vstart) );
-    # 	$vend = $mend if ( $endepoch > str2time ($vend) );
-    # 	$request{"$net|$sta|$dloc|$chan|$rstart|$rend"} = "$vstart|$vend";
-    # }
   }
 
   printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose >= 1 );
@@ -1277,6 +1271,25 @@ sub MDCallBack {
   if ( $verbose >= 1 && ! $nobsprint ) {
     printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
   }
+}
+
+
+######################################################################
+# mktimestring (time):
+#
+# Return a time string in YYYY-MM-DDTHH:MM:SS format for the specified
+# time value.
+######################################################################
+sub mktimestring {
+  my $time = shift;
+
+  ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime ($time);
+
+  $year += 1900;
+  $mon += 1;
+
+  return sprintf ("%04d-%02d-%02dT%02d:%02d:%02d",
+		  $year,$mon,$mday,$hour,$min,$ssec);
 }
 
 
