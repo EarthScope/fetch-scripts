@@ -152,6 +152,19 @@
 #  instead of reusing the same client object.  This is to make sure no
 #  authentication details are shared between requests.
 #
+# 2014.129
+#  - Convert metadata fetching to use POST capability of fdsnws-station.
+#  This allows making a single metadata request when the request is a list of
+#  many selections (selection list file or BREQ_FAST), instead of generating a
+#  request for each selection line.  More efficient.
+#  - Code simplification: separately manage request list for secondary metadata
+#  such as SACPZ or RESP, track and request a range from earliest to latest
+#  metadata epochs for each channel.  This fixes a bug where only the last epoch
+#  is represented in a metadata file when the request crosses many epochs.
+#
+# 2014.132
+#  - Optimize the metadata and request window matching by using compiled regexes.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -163,7 +176,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.128";
+my $version = "2014.132";
 
 my $scriptname = basename($0);
 
@@ -420,14 +433,9 @@ if ( $verbose > 2 ) {
   print STDERR "Radius range: $degrange[0] : $degrange[1] : $degrange[2] : $degrange[3]\n" if ( scalar @degrange );
 }
 
-# Add blank request entry if selections have been implicitly identified by location ranges
-if ( ! scalar @selections && (scalar @latrange || scalar @lonrange || scalar @degrange) ) {
-  push (@selections,"|||||");
-}
-
 # An array to hold channel list and metadata
-my %request = ();     # Value is metadata epoch for data selection
-my %metarequest = (); # Value is metadata range for RESP and SACPZ selection
+my %request = ();     # Value is metadata epoch for data selection as time strings
+my %metarequest = (); # Value is metadata range for RESP and SACPZ selection as epoch times
 my @metadata = ();
 my $metadataresp;
 
@@ -724,8 +732,8 @@ sub FetchTimeSeriesData {
     $count++;
 
     # Determine day coverage for this request
-    my $rstartepoch = str2time ($wstart);
-    my $rendepoch = str2time ($wend);
+    my $rstartepoch = str2time ($wstart, "UTC");
+    my $rendepoch = str2time ($wend, "UTC");
     my $reqdays = int ((($rendepoch - $rstartepoch) / 86400.0) + 0.5);
     $reqdays = 1 if ( $reqdays < 1 );
 
@@ -847,9 +855,9 @@ sub FetchTimeSeriesData {
 ######################################################################
 # FetchSACPZ:
 #
-# Fetch SAC Poles and Zeros for each entry in the %request hash with a
-# defined value.  The result for each channel is written to a separate
-# file in the specified directory.
+# Fetch SAC Poles and Zeros for each entry in the %metarequest hash
+# with a defined value.  The result for each channel is written to a
+# separate file in the specified directory.
 #
 ######################################################################
 sub FetchSACPZ {
@@ -866,13 +874,15 @@ sub FetchSACPZ {
   my $totalbytes = 0;
 
   foreach my $req ( sort keys %metarequest ) {
+    # Skip entries with values not defined, perhaps no data was fetched
+    next if ( ! defined $metarequest{$req} );
 
     my ($rnet,$rsta,$rloc,$rchan) = split (/\|/, $req);
     my ($mstart,$mend) = split (/\|/, $metarequest{$req});
-    $count++;
 
-    #CHAD, convert metarequest values to time strings...
-    &mktimestring
+    my $rstart = &mktimestring ($mstart);
+    my $rend = &mktimestring ($mend);
+    $count++;
 
     # Generate output file name and open
     my $sacpzfile = "$sacpzdir/SACPZ.$rnet.$rsta.$rloc.$rchan";
@@ -880,10 +890,6 @@ sub FetchSACPZ {
       print STDERR "Cannot open output file '$sacpzfile': $!\n";
       next;
     }
-
-    # Use metadata start and end if not specified
-    $rstart = $mstart if ( ! $rstart );
-    $rend = $mend if ( ! $rend );
 
     # Create web service URI
     my $uri = "${sacpzservice}/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
@@ -938,9 +944,9 @@ sub FetchSACPZ {
 ######################################################################
 # FetchRESP:
 #
-# Fetch SEED RESP for each entry in the %request hash with a value of
-# 1.  The result for each channel is written to a separate file in the
-# specified directory.
+# Fetch SEED RESP for each entry in the %metarequest hash with a value
+# of 1.  The result for each channel is written to a separate file in
+# the specified directory.
 #
 ######################################################################
 sub FetchRESP {
@@ -950,18 +956,21 @@ sub FetchRESP {
 
   my $count = 0;
   my $total = 0;
-  foreach my $req ( keys %request ) { $total++ if ( defined $request{$req} ); }
+  foreach my $req ( keys %metarequest ) { $total++ if ( defined $metarequest{$req} ); }
 
   print STDERR "Fetching RESP\n" if ( $verbose >= 1 );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
-  foreach my $req ( sort keys %request ) {
-    # Skip entries with values not set to 1, perhaps no data was fetched
-    next if ( ! defined $request{$req} );
+  foreach my $req ( sort keys %metarequest ) {
+    # Skip entries with values not defined, perhaps no data was fetched
+    next if ( ! defined $metarequest{$req} );
 
-    my ($rnet,$rsta,$rloc,$rchan,$rstart,$rend) = split (/\|/, $req);
-    my ($mstart,$mend) = split (/\|/, $request{$req});
+    my ($rnet,$rsta,$rloc,$rchan) = split (/\|/, $req);
+    my ($mstart,$mend) = split (/\|/, $metarequest{$req});
+
+    my $rstart = &mktimestring ($mstart);
+    my $rend = &mktimestring ($mend);
     $count++;
 
     # Translate metadata location ID from "--" to blank
@@ -973,10 +982,6 @@ sub FetchRESP {
       print STDERR "Cannot open output file '$respfile': $!\n";
       next;
     }
-
-    # Use metadata start and end if not specified
-    $rstart = $mstart if ( ! $rstart );
-    $rend = $mend if ( ! $rend );
 
     # Create web service URI
     my $uri = "${respservice}/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
@@ -1083,21 +1088,22 @@ sub FetchMetaData {
   $postdata .= "format=text\n";
 
   if ( scalar @latrange ) {
-    $postdata .= "minlatitude=$latrange[0]" if ( defined $latrange[0] );
-    $postdata .= "maxlatitude=$latrange[1]" if ( defined $latrange[1] );
+    $postdata .= "minlatitude=$latrange[0]\n" if ( defined $latrange[0] );
+    $postdata .= "maxlatitude=$latrange[1]\n" if ( defined $latrange[1] );
   }
   if ( scalar @lonrange ) {
-    $postdata .= "minlongitude=$lonrange[0]" if ( defined $lonrange[0] );
-    $postdata .= "maxlongitude=$lonrange[1]" if ( defined $lonrange[1] );
+    $postdata .= "minlongitude=$lonrange[0]\n" if ( defined $lonrange[0] );
+    $postdata .= "maxlongitude=$lonrange[1]\n" if ( defined $lonrange[1] );
   }
   if ( scalar @degrange ) {
-    $postdata .= "latitude=$degrange[0]" if ( defined $degrange[0] );
-    $postdata .= "longitude=$degrange[1]" if ( defined $degrange[1] );
-    $postdata .= "maxradius=$degrange[2]" if ( defined $degrange[2] );
-    $postdata .= "minradius=$degrange[3]" if ( defined $degrange[3] );
+    $postdata .= "latitude=$degrange[0]\n" if ( defined $degrange[0] );
+    $postdata .= "longitude=$degrange[1]\n" if ( defined $degrange[1] );
+    $postdata .= "maxradius=$degrange[2]\n" if ( defined $degrange[2] );
+    $postdata .= "minradius=$degrange[3]\n" if ( defined $degrange[3] );
   }
 
   my %selectmatch = ();
+  my %selectmatchqr = ();
 
   # Translate selections to POST body repeat lines and build selection hash for matching
   foreach my $selection ( @selections ) {
@@ -1119,11 +1125,14 @@ sub FetchMetaData {
     $key =~ s/\*/\.\*/g;  # '*' => '.*'
     $key =~ s/\?/\./g;    # '?' => '.'
 
-    my $kstart = ( $sstart ) ? str2time ($sstart) : undef;
-    my $kend = ( $send ) ? str2time ($send): undef;
+    my $kstart = ( $sstart ) ? str2time ($sstart, "UTC") : undef;
+    my $kend = ( $send ) ? str2time ($send, "UTC"): undef;
 
     # Add entry to selection matching hash
     $selectmatch{$key}{"$kstart|$kend"} = "$sstart|$send";
+
+    # Store compiled regular expression for faster matching
+    $selectmatchqr{$key} = qr/$key/;
   }
 
   my $ftime = Time::HiRes::time;
@@ -1170,7 +1179,7 @@ sub FetchMetaData {
   my $totalepochs = 0;
   my $ptime = Time::HiRes::time;
 
-  print STDERR "Parsing metadata... " if ( $verbose >= 1 );
+  print STDERR "Parsing metadata and generating requests... " if ( $verbose >= 1 );
 
   # Loop through each metadata return line and do the following:
   #  1) insert into metadata storage list
@@ -1200,14 +1209,19 @@ sub FetchMetaData {
     my ($y,$mo,$d,$h,$m,$s) = $mend   =~ /^(\d{4,4})[-\/,:](\d{1,2})[-\/,:](\d{1,2})[-\/,:T](\d{1,2})[-\/,:](\d{1,2})[-\/,:](\d{1,2}).*/;
     my $cend =   ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
 
-    my $cstart = str2time ($cstart);
-    my $cend = str2time ($cend);
+    # Determine epoch times for metadata start and end for matching below
+    my $cstart = str2time ($cstart, "UTC");
+    my $cend = str2time ($cend, "UTC");
+
+    # Create NSLC string to match against
+    my $nslcmatch = "${mnet}_${msta}_${mloc}_${mchan}";
 
     # Match metadata to selections (requests)
+  REQUESTS:
     foreach my $key ( keys %selectmatch ) {
 
-      # Skip non-matching entries
-      next if "${mnet}_${msta}_${mloc}_${mchan}" !~ /^$key$/;
+      # Skip non-matching entries, use compiled regex to match
+      next if $nslcmatch !~ $selectmatchqr{$key};
 
       # Check for time overlap (intersection) with metadata
       foreach my $timekey ( keys %{$selectmatch{$key}} ) {
@@ -1232,6 +1246,9 @@ sub FetchMetaData {
 
 	    $metarequest{"$mnet|$msta|$mloc|$mchan"} = "$vstart|$vend";
 	  }
+
+	  # No need to search further, the request has been matched.
+	  last REQUESTS;
 	}
       }
     }
@@ -1283,13 +1300,15 @@ sub MDCallBack {
 sub mktimestring {
   my $time = shift;
 
-  ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime ($time);
+  return undef if ( ! $time );
+
+  my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime ($time);
 
   $year += 1900;
   $mon += 1;
 
   return sprintf ("%04d-%02d-%02dT%02d:%02d:%02d",
-		  $year,$mon,$mday,$hour,$min,$ssec);
+		  $year,$mon,$mday,$hour,$min,$sec);
 }
 
 
