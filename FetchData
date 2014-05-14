@@ -162,7 +162,7 @@
 #  metadata epochs for each channel.  This fixes a bug where only the last epoch
 #  is represented in a metadata file when the request crosses many epochs.
 #
-# 2014.132
+# 2014.134
 #  - Optimize the metadata and request window matching by using compiled regexes.
 #
 # Author: Chad Trabant, IRIS Data Management Center
@@ -176,7 +176,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.132";
+my $version = "2014.134";
 
 my $scriptname = basename($0);
 
@@ -1126,13 +1126,13 @@ sub FetchMetaData {
     $key =~ s/\?/\./g;    # '?' => '.'
 
     my $kstart = ( $sstart ) ? str2time ($sstart, "UTC") : undef;
-    my $kend = ( $send ) ? str2time ($send, "UTC"): undef;
+    my $kend = ( $send ) ? str2time ($send, "UTC") : undef;
 
-    # Add entry to selection matching hash
+    # Add entry to selection matching hash, this will eliminate exact duplicates
     $selectmatch{$key}{"$kstart|$kend"} = "$sstart|$send";
 
     # Store compiled regular expression for faster matching
-    $selectmatchqr{$key} = qr/$key/;
+    $selectmatchqr{$key} = qr/$key/ if ( ! exists $selectmatchqr{$key} );
   }
 
   my $ftime = Time::HiRes::time;
@@ -1217,7 +1217,6 @@ sub FetchMetaData {
     my $nslcmatch = "${mnet}_${msta}_${mloc}_${mchan}";
 
     # Match metadata to selections (requests)
-  REQUESTS:
     foreach my $key ( keys %selectmatch ) {
 
       # Skip non-matching entries, use compiled regex to match
@@ -1247,8 +1246,8 @@ sub FetchMetaData {
 	    $metarequest{"$mnet|$msta|$mloc|$mchan"} = "$vstart|$vend";
 	  }
 
-	  # No need to search further, the request has been matched.
-	  last REQUESTS;
+	  # Remove request hash entry to avoid this request matching again
+	  delete ($selectmatch{$key}{$timekey});
 	}
       }
     }
