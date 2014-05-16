@@ -1133,8 +1133,7 @@ sub FetchMetaData {
     my $kstart = ( $sstart ) ? str2time ($sstart, "UTC") : undef;
     my $kend = ( $send ) ? str2time ($send, "UTC") : undef;
 
-    # Create nested hash keys and convert simple globbing wildcards to regex
-    my $key = "${snet}_${ssta}_${sloc}_${schan}";
+    # Nested hash keys: convert simple globbing wildcards to regex
     $snet =~ s/\*/\.\*/g;  # '*' => '.*'
     $snet =~ s/\?/\./g;    # '?' => '.'
     $ssta =~ s/\*/\.\*/g;  # '*' => '.*'
