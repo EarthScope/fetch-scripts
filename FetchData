@@ -174,6 +174,7 @@
 # 2014.136
 #  - Fetch metadata for virtual networks separately from all other metadata in
 #  order to properly match data requests with metadata.
+#  - Properly match lists in network, station, location and channel fields.
 #
 # Author: Chad Trabant, IRIS Data Management Center
 
@@ -1100,8 +1101,10 @@ sub FetchMetaData {
   my $mtime = Time::HiRes::time;
 
   # Split selections into lists for virtual networks and regular networks
-  my @vnetselections = grep (/[\_\.\~]/, @selections );
-  my @netselections = grep (/[^\_\.\~]/, @selections );
+  # Requests including virtual networks are identified by searching
+  # for [_.~] in the first (network) field.
+  my @vnetselections = grep { (split(/\|/))[0] =~ /[\_\.\~]/ } @selections;
+  my @netselections = grep { (split(/\|/))[0] !~ /[\_\.\~]/ } @selections;
 
   my $totalepochs = 0;
 
@@ -1184,15 +1187,12 @@ sub FetchMetaDataHelper {
     # Use '*' for virtual network matching, search for [_.~] to identify vnets
     $snet = "*" if ( $snet =~ /[\_\.\~]/ );
 
-    # Nested hash keys: convert simple globbing wildcards to regex
-    $snet =~ s/\*/\.\*/g;  # '*' => '.*'
-    $snet =~ s/\?/\./g;    # '?' => '.'
-    $ssta =~ s/\*/\.\*/g;  # '*' => '.*'
-    $ssta =~ s/\?/\./g;    # '?' => '.'
-    $sloc =~ s/\*/\.\*/g;  # '*' => '.*'
-    $sloc =~ s/\?/\./g;    # '?' => '.'
-    $schan =~ s/\*/\.\*/g; # '*' => '.*'
-    $schan =~ s/\?/\./g;   # '?' => '.'
+    # Nested hash keys: convert simple globbing wildcards (and list) to regex
+    # Translations: '*' => '.*' and '?' => '.' and ',' => '|'
+    $snet =~ s/\*/\.\*/g;   $snet =~ s/\?/\./g;  $snet =~ s/\,/\|/g;
+    $ssta =~ s/\*/\.\*/g;   $ssta =~ s/\?/\./g;  $ssta =~ s/\,/\|/g;
+    $sloc =~ s/\*/\.\*/g;   $sloc =~ s/\?/\./g;  $sloc =~ s/\,/\|/g;
+    $schan =~ s/\*/\.\*/g; $schan =~ s/\?/\./g; $schan =~ s/\,/\|/g;
 
     # Compile regular expressions for faster comparison
     $snet = qr/$snet/;
