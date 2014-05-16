@@ -171,6 +171,10 @@
 #  - Avoid selecting too much secondary metadata (SACPZ and RESP) by shrinking
 #  the request window by one second on each end.
 #
+# 2014.136
+#  - Fetch metadata for virtual networks separately from all other metadata in
+#  order to properly match data requests with metadata.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -182,7 +186,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.135";
+my $version = "2014.136";
 
 my $scriptname = basename($0);
 
@@ -1084,8 +1088,52 @@ sub DLCallBack {
 # request hash entries is maintained to be the range of Channel epochs
 # that match the time selection.
 #
+# As an exception to fetching all metadata at once, any selection
+# specified with a virtual network (starting with [_.~]) is fetched
+# individually.  This is needed to properly match the returned metadata
+# (that does not contain virtual network codes) to the time range of
+# the request.
+#
 ######################################################################
 sub FetchMetaData {
+
+  my $mtime = Time::HiRes::time;
+
+  # Split selections into lists for virtual networks and regular networks
+  my @vnetselections = grep (/[\_\.\~]/, @selections );
+  my @netselections = grep (/[^\_\.\~]/, @selections );
+
+  my $totalepochs = 0;
+
+  # Fetch metadata for virtual network requests individually
+  foreach my $selection ( @vnetselections ) {
+    $totalepochs += &FetchMetaDataHelper ([$selection]);
+  }
+
+  # Process all regular networks as a group
+  if ( scalar @netselections ) {
+    $totalepochs += &FetchMetaDataHelper (\@netselections);
+  }
+
+  my $duration = Time::HiRes::time - $mtime;
+  printf (STDERR "Processed metadata for $totalepochs channel epochs in %.1f seconds\n",
+	  $duration) if ( $verbose >= 0 );
+
+} # End of FetchMetaData
+
+
+######################################################################
+# FetchMetaDataHelper:
+#
+# Construct, issue and process request for metadata on behalf of
+# FetchMetaData().  This will populate the global @metadata array and
+# %request hash.
+#
+# Returns the total number of metadata epochs processed.
+######################################################################
+sub FetchMetaDataHelper {
+  my $selectionref = shift;
+
   # Create HTTP user agent
   my $ua = RequestAgent->new();
   $ua->env_proxy;
@@ -1116,7 +1164,7 @@ sub FetchMetaData {
   my %selectmatch = ();
 
   # Translate selections to POST body repeat lines and build selection hash for matching
-  foreach my $selection ( @selections ) {
+  foreach my $selection ( @{$selectionref} ) {
     my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
 
     # Subsitute non-specified fields with wildcards
@@ -1132,6 +1180,9 @@ sub FetchMetaData {
 
     my $kstart = ( $sstart ) ? str2time ($sstart, "UTC") : undef;
     my $kend = ( $send ) ? str2time ($send, "UTC") : undef;
+
+    # Use '*' for virtual network matching, search for [_.~] to identify vnets
+    $snet = "*" if ( $snet =~ /[\_\.\~]/ );
 
     # Nested hash keys: convert simple globbing wildcards to regex
     $snet =~ s/\*/\.\*/g;  # '*' => '.*'
@@ -1285,12 +1336,8 @@ sub FetchMetaData {
 
   printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose >= 1 );
 
-  my $duration = Time::HiRes::time - $ftime;
-  my $rate = $datasize/(($duration)?$duration:0.000001);
-  printf (STDERR "Processed metadata for $totalepochs channel epochs in %.1f seconds (%s/s)\n",
-	  $duration, sizestring($rate)) if ( $verbose >= 0 );
-
-} # End of FetchMetaData()
+  return $totalepochs;
+} # End of FetchMetaDataHelper()
 
 
 ######################################################################
