@@ -1185,6 +1185,7 @@ sub FetchMetaDataHelper {
     my $kend = ( $send ) ? str2time ($send, "UTC") : undef;
 
     # Use '*' for virtual network matching, search for [_.~] to identify vnets
+    # The caller of this subroutine should guarantee only a single request
     $snet = "*" if ( $snet =~ /[\_\.\~]/ );
 
     # Nested hash keys: convert simple globbing wildcards (and list) to regex
