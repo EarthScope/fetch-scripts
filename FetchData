@@ -165,6 +165,12 @@
 # 2014.134
 #  - Optimize the metadata and request window matching by using compiled regexes.
 #
+# 2014.135
+#  - Fix matching requests and metadata for open time windows.
+#  - Optimize request and metadata matching with a nested hash of compiled regexes.
+#  - Avoid selecting too much secondary metadata (SACPZ and RESP) by shrinking
+#  the request window by one second on each end.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -176,7 +182,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.134";
+my $version = "2014.135";
 
 my $scriptname = basename($0);
 
@@ -880,8 +886,10 @@ sub FetchSACPZ {
     my ($rnet,$rsta,$rloc,$rchan) = split (/\|/, $req);
     my ($mstart,$mend) = split (/\|/, $metarequest{$req});
 
-    my $rstart = &mktimestring ($mstart);
-    my $rend = &mktimestring ($mend);
+    # Create time strings for request, shrink window by one second to avoid
+    # matching too many metadata ranges by avoiding the boundary.
+    my $rstart = &mktimestring ($mstart + 1);
+    my $rend = &mktimestring ($mend - 1);
     $count++;
 
     # Generate output file name and open
@@ -969,8 +977,10 @@ sub FetchRESP {
     my ($rnet,$rsta,$rloc,$rchan) = split (/\|/, $req);
     my ($mstart,$mend) = split (/\|/, $metarequest{$req});
 
-    my $rstart = &mktimestring ($mstart);
-    my $rend = &mktimestring ($mend);
+    # Create time strings for request, shrink window by one second to avoid
+    # matching too many metadata ranges by avoiding the boundary.
+    my $rstart = &mktimestring ($mstart + 1);
+    my $rend = &mktimestring ($mend - 1);
     $count++;
 
     # Translate metadata location ID from "--" to blank
@@ -1102,8 +1112,8 @@ sub FetchMetaData {
     $postdata .= "minradius=$degrange[3]\n" if ( defined $degrange[3] );
   }
 
+  # A nested hash used to match data requests with metadata
   my %selectmatch = ();
-  my %selectmatchqr = ();
 
   # Translate selections to POST body repeat lines and build selection hash for matching
   foreach my $selection ( @selections ) {
@@ -1120,19 +1130,28 @@ sub FetchMetaData {
     # Add line to POST body for this selection
     $postdata .= "$snet $ssta $sloc $schan $pstart $pend\n";
 
-    # Create key and convert simple globbing wildcards to regex
-    my $key = "${snet}_${ssta}_${sloc}_${schan}";
-    $key =~ s/\*/\.\*/g;  # '*' => '.*'
-    $key =~ s/\?/\./g;    # '?' => '.'
-
     my $kstart = ( $sstart ) ? str2time ($sstart, "UTC") : undef;
     my $kend = ( $send ) ? str2time ($send, "UTC") : undef;
 
-    # Add entry to selection matching hash, this will eliminate exact duplicates
-    $selectmatch{$key}{"$kstart|$kend"} = "$sstart|$send";
+    # Create nested hash keys and convert simple globbing wildcards to regex
+    my $key = "${snet}_${ssta}_${sloc}_${schan}";
+    $snet =~ s/\*/\.\*/g;  # '*' => '.*'
+    $snet =~ s/\?/\./g;    # '?' => '.'
+    $ssta =~ s/\*/\.\*/g;  # '*' => '.*'
+    $ssta =~ s/\?/\./g;    # '?' => '.'
+    $sloc =~ s/\*/\.\*/g;  # '*' => '.*'
+    $sloc =~ s/\?/\./g;    # '?' => '.'
+    $schan =~ s/\*/\.\*/g; # '*' => '.*'
+    $schan =~ s/\?/\./g;   # '?' => '.'
 
-    # Store compiled regular expression for faster matching
-    $selectmatchqr{$key} = qr/$key/ if ( ! exists $selectmatchqr{$key} );
+    # Compile regular expressions for faster comparison
+    $snet = qr/$snet/;
+    $ssta = qr/$ssta/;
+    $sloc = qr/$sloc/;
+    $schan = qr/$schan/;
+
+    # Add entry to selection matching hash, this will eliminate exact duplicates
+    $selectmatch{$snet}{$ssta}{$sloc}{$schan}{"$kstart|$kend"} = "$sstart|$send";
   }
 
   my $ftime = Time::HiRes::time;
@@ -1181,12 +1200,20 @@ sub FetchMetaData {
 
   print STDERR "Parsing metadata and generating requests... " if ( $verbose >= 1 );
 
+  # Matching request entries to metadata.
+  #
+  # This is a many-to-many relationship due to the wildcards, a single
+  # request entry can match multiple metadata entries and a single metadata
+  # entry can match multiple request entries.
+  #
   # Loop through each metadata return line and do the following:
   #  1) insert into metadata storage list
   #  2) search for matching user selection entries and
   #     a) create request hash entries for each selection that matches using the
   #        original request time window.
-  #     b) track the largest combined metadata time window for each request
+  #     b) track the largest combined metadata time window for each channel
+  #        for requesting secondary metadata (SACPZ and RESP).
+
   foreach my $line ( split (/[\n\r]+/, $metadataresp) ) {
     chomp $line;
     next if ( $line =~ /^#.*/ );  # Skip comment lines beginning with '#'
@@ -1213,45 +1240,49 @@ sub FetchMetaData {
     my $cstart = str2time ($cstart, "UTC");
     my $cend = str2time ($cend, "UTC");
 
-    # Create NSLC string to match against
-    my $nslcmatch = "${mnet}_${msta}_${mloc}_${mchan}";
+    # Match metadata to selections (requests) using nested hash of (compiled) regexes
+    foreach my $knet ( keys %selectmatch ) {
+      next if $mnet !~ $knet;
 
-    # Match metadata to selections (requests)
-    foreach my $key ( keys %selectmatch ) {
+      foreach my $ksta ( keys %{$selectmatch{$knet}} ) {
+	next if $msta !~ $ksta;
 
-      # Skip non-matching entries, use compiled regex to match
-      next if $nslcmatch !~ $selectmatchqr{$key};
+	foreach my $kloc ( keys %{$selectmatch{$knet}{$ksta}} ) {
+	  next if $mloc !~ $kloc;
 
-      # Check for time overlap (intersection) with metadata
-      foreach my $timekey ( keys %{$selectmatch{$key}} ) {
-	my ($kstart,$kend) = split (/\|/, $timekey);
+	  foreach my $kchan ( keys %{$selectmatch{$knet}{$ksta}{$kloc}} ) {
+	    next if $mchan !~ $kchan;
 
-	# If time ranges intersect add to request hash
-	if ( $cstart <= $kend && $cend >= $kstart ) {
-	  my ($sstart,$send) = split (/\|/, $selectmatch{$key}{$timekey});
+	    # Check for time overlap (intersection) with metadata
+	    foreach my $timekey ( keys %{$selectmatch{$knet}{$ksta}{$kloc}{$kchan}} ) {
+	      my ($kstart,$kend) = split (/\|/, $timekey);
 
-	  # Add entry to request hash with value of matching metadata
-	  $request{"$mnet|$msta|$mloc|$mchan|$sstart|$send"} = "$mstart|$mend";
+	      # If time ranges intersect add to request hash, account for unspecified/undef time entries
+	      if ( ($cstart <= $kend || ! defined $kend) && ($cend >= $kstart || ! defined $kstart) ) {
+		my ($sstart,$send) = split (/\|/, $selectmatch{$knet}{$ksta}{$kloc}{$kchan}{$timekey});
 
-	  # Track widest metadata range for NSLC for SACPZ and RESP requests
-	  if ( ! exists $metarequest{"$mnet|$msta|$mloc|$mchan"} ) {
-	    $metarequest{"$mnet|$msta|$mloc|$mchan"} = "$cstart|$cend";
+		# Add entry to request hash with value of matching metadata
+		$request{"$mnet|$msta|$mloc|$mchan|$sstart|$send"} = "$mstart|$mend";
+
+		# Track widest metadata range for NSLC for SACPZ and RESP requests
+		if ( ! exists $metarequest{"$mnet|$msta|$mloc|$mchan"} ) {
+		  $metarequest{"$mnet|$msta|$mloc|$mchan"} = "$cstart|$cend";
+		}
+		else {
+		  my ($vstart,$vend) = split (/\|/, $metarequest{"$mnet|$msta|$mloc|$mchan"});
+
+		  $vstart = $cstart if ( $cstart < $vstart );
+		  $vend = $cend if ( $cend > $vend );
+
+		  $metarequest{"$mnet|$msta|$mloc|$mchan"} = "$vstart|$vend";
+		}
+	      }
+	    }
 	  }
-	  else {
-	    my ($vstart,$vend) = split (/\|/, $metarequest{"$mnet|$msta|$mloc|$mchan"});
-
-	    $vstart = $cstart if ( $cstart < $vstart );
-	    $vend = $cend if ( $cend > $vend );
-
-	    $metarequest{"$mnet|$msta|$mloc|$mchan"} = "$vstart|$vend";
-	  }
-
-	  # Remove request hash entry to avoid this request matching again
-	  delete ($selectmatch{$key}{$timekey});
 	}
       }
     }
-  }
+  } # End of looping through metadata results
 
   printf STDERR "Done (%.1f seconds)\n", Time::HiRes::time - $ptime if ( $verbose >= 1 );
 
