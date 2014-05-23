@@ -176,6 +176,10 @@
 #  order to properly match data requests with metadata.
 #  - Properly match lists in network, station, location and channel fields.
 #
+# 2014.142
+#  - Fetch metadata using extents for each unique NSLC group, this can be a much
+#  smaller (and faster query) for requests with a large number of repeated NSLCs.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -187,7 +191,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.136";
+my $version = "2014.142";
 
 my $scriptname = basename($0);
 
@@ -1166,6 +1170,9 @@ sub FetchMetaDataHelper {
   # A nested hash used to match data requests with metadata
   my %selectmatch = ();
 
+  # A nested hash of time extents for each NSLC request
+  my %selectextent = ();
+
   # Translate selections to POST body repeat lines and build selection hash for matching
   foreach my $selection ( @{$selectionref} ) {
     my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
@@ -1178,11 +1185,27 @@ sub FetchMetaDataHelper {
     my $pstart = ( $sstart ) ? $sstart : "*";
     my $pend = ( $send ) ? $send : "*";
 
-    # Add line to POST body for this selection
-    $postdata .= "$snet $ssta $sloc $schan $pstart $pend\n";
-
     my $kstart = ( $sstart ) ? str2time ($sstart, "UTC") : undef;
     my $kend = ( $send ) ? str2time ($send, "UTC") : undef;
+
+    # Track time extents for each NSLC
+    if ( ! exists $selectextent{$snet}{$ssta}{$sloc}{$schan} ) {
+      $selectextent{$snet}{$ssta}{$sloc}{$schan} = [$pstart,$pend,$kstart,$kend];
+    }
+    else {
+      my ($estart,$eend,$ekstart,$ekend) = @{$selectextent{$snet}{$ssta}{$sloc}{$schan}};
+
+      if ( ! defined $kstart || $kstart < $ekstart ) {
+	$ekstart = $kstart;
+	$estart = $pstart;
+      }
+      if ( ! defined $kend || $kend > $ekend ) {
+	$ekend = $kend;
+	$eend = $pend;
+      }
+
+      $selectextent{$snet}{$ssta}{$sloc}{$schan} = [$estart,$eend,$ekstart,$ekend];
+    }
 
     # Use '*' for virtual network matching, search for [_.~] to identify vnets
     # The caller of this subroutine should guarantee only a single request
@@ -1203,6 +1226,19 @@ sub FetchMetaDataHelper {
 
     # Add entry to selection matching hash, this will eliminate exact duplicates
     $selectmatch{$snet}{$ssta}{$sloc}{$schan}{"$kstart|$kend"} = "$sstart|$send";
+  }
+
+  # Build sorted POST selection from time extents for channels
+  foreach my $net ( sort keys %selectextent ) {
+    foreach my $sta ( sort keys %{$selectextent{$net}} ) {
+      foreach my $loc ( sort keys %{$selectextent{$net}{$sta}} ) {
+	foreach my $chan ( sort keys %{$selectextent{$net}{$sta}{$loc}} ) {
+	  my ($start,$end) = @{$selectextent{$net}{$sta}{$loc}{$chan}};
+
+	  $postdata .= "$net $sta $loc $chan $start $end\n";
+	}
+      }
+    }
   }
 
   my $ftime = Time::HiRes::time;
@@ -1275,12 +1311,6 @@ sub FetchMetaDataHelper {
     # Translate metadata location ID to "--" if it's spaces
     $mloc = "--" if ( $mloc eq "  " );
 
-    # Track epoch count
-    $totalepochs++;
-
-    # Push channel epoch metadata into storage list
-    push (@metadata, "$mnet|$msta|$mloc|$mchan|$mstart|$mend|$mlat|$mlon|$melev|$mdepth|$mazimuth|$mdip|$minstrument|$msamplerate|$mscale|$mscalefreq|$mscaleunits");
-
     # Cleanup start and end strings, with truncation to 2038-01-01T00:00:00 for older Perls
     my ($y,$mo,$d,$h,$m,$s) = $mstart =~ /^(\d{4,4})[-\/,:](\d{1,2})[-\/,:](\d{1,2})[-\/,:T](\d{1,2})[-\/,:](\d{1,2})[-\/,:](\d{1,2}).*/;
     my $cstart = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
@@ -1290,6 +1320,9 @@ sub FetchMetaDataHelper {
     # Determine epoch times for metadata start and end for matching below
     my $cstart = str2time ($cstart, "UTC");
     my $cend = str2time ($cend, "UTC");
+
+    # Track if metadata has been added to @metadata, only add once if matching a request
+    my $metadatalisted = 0;
 
     # Match metadata to selections (requests) using nested hash of (compiled) regexes
     foreach my $knet ( keys %selectmatch ) {
@@ -1309,8 +1342,15 @@ sub FetchMetaDataHelper {
 	      my ($kstart,$kend) = split (/\|/, $timekey);
 
 	      # If time ranges intersect add to request hash, account for unspecified/undef time entries
-	      if ( ($cstart <= $kend || ! defined $kend) && ($cend >= $kstart || ! defined $kstart) ) {
+	      if ( ($cstart <= $kend || ! $kend) && ($cend >= $kstart || ! $kstart) ) {
 		my ($sstart,$send) = split (/\|/, $selectmatch{$knet}{$ksta}{$kloc}{$kchan}{$timekey});
+
+		# Push channel epoch metadata into storage list
+		if ( ! $metadatalisted ) {
+		  push (@metadata, "$mnet|$msta|$mloc|$mchan|$mstart|$mend|$mlat|$mlon|$melev|$mdepth|$mazimuth|$mdip|$minstrument|$msamplerate|$mscale|$mscalefreq|$mscaleunits");
+		  $metadatalisted = 1;
+		  $totalepochs++;
+		}
 
 		# Add entry to request hash with value of matching metadata
 		$request{"$mnet|$msta|$mloc|$mchan|$sstart|$send"} = "$mstart|$mend";
