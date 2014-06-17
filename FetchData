@@ -85,6 +85,11 @@
 #
 # ## Change history ##
 #
+# 2013.168:
+#  - Follow redirects for POST method in addition to default GET and HEAD.
+#  - A small bit of special output for 429 (Too Many Requests) results to
+#  help the user understand what is going on.
+#
 # 2013.042:
 #  - Rename to FetchData (from FetchBulkData), truncate change log.
 #  - Use the LWP::UserAgent method env_proxy() to check for and use connection
@@ -191,7 +196,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.142";
+my $version = "2014.168";
 
 my $scriptname = basename($0);
 
@@ -823,8 +828,14 @@ sub FetchTimeSeriesData {
     elsif ( ! $response->is_success() ) {
       print (STDERR "Error fetching time series data: "
 	     . $response->code . " :: " . status_message($response->code) . "\n");
-      print STDERR "------\n" . $response->decoded_content . "\n------\n";
-      print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+
+      if ( $response->code == 429 ) {
+	print STDERR "Usage has exceeded data center limit, try making fewer concurrent requests\n";
+      }
+      else {
+	print STDERR "------\n" . $response->decoded_content . "\n------\n";
+	print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+      }
 
       # Exit immediately if we are not retrying
       exit 1 if ( $noretry );
@@ -1473,9 +1484,15 @@ BEGIN {
   sub new
     {
       my $self = LWP::UserAgent::new(@_);
+
+      # Set up UserAgent
       my $fulluseragent = $useragent;
       $fulluseragent .= " ($appname)" if ( $appname );
       $self->agent($fulluseragent);
+
+      # Follow redirects on POST method in addition to GET and HEAD
+      push @{ $self->requests_redirectable }, 'POST';
+
       $self;
     }
 
