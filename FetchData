@@ -85,13 +85,6 @@
 #
 # ## Change history ##
 #
-# 2013.168:
-#  - Explicitly match metadata epochs to time series requests to avoid
-#  matching substrings, e.g. MONP matching MONP2.
-#  - Follow redirects for POST method in addition to default GET and HEAD.
-#  - A small bit of special output for 429 (Too Many Requests) results to
-#  help the user understand what is going on.
-#
 # 2013.042:
 #  - Rename to FetchData (from FetchBulkData), truncate change log.
 #  - Use the LWP::UserAgent method env_proxy() to check for and use connection
@@ -186,6 +179,13 @@
 # 2014.142
 #  - Fetch metadata using extents for each unique NSLC group, this can be a much
 #  smaller (and faster query) for requests with a large number of repeated NSLCs.
+#
+# 2014.168:
+#  - Explicitly match metadata epochs to time series requests to avoid
+#  matching substrings, e.g. MONP matching MONP2.
+#  - Follow redirects for POST method in addition to default GET and HEAD.
+#  - A small bit of special output for 429 (Too Many Requests) results to
+#  help the user understand what is going on.
 #
 # Author: Chad Trabant, IRIS Data Management Center
 
