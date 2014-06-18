@@ -3,7 +3,7 @@
 # fdsnws-dataselect "bridge" handler:
 #
 # A test and template handler for the IRIS Web Service Shell (WSS)
-# implementing fdsnws-dataselect version 1.0.
+# implementing fdsnws-dataselect version 1.1.
 #
 # This handler validates and processes a request and responds as
 # expected by the WSS using a IRIS web service to fulfill the request.
@@ -65,12 +65,16 @@
 #
 # ChangeLog:
 #
-# 2013.031:
-#  - Initial version
+# 2014.168
+#  - Add handling for fdsnws-dataselect 1.1 'format' parameter by accepting
+#  the --format option and forwarding the parameter.
 #
 # 2013.042:
 #  - Call UserAgent::env_proxy so that LWP requests use common
 #  environtment variables such as http_proxy.
+#
+# 2013.031:
+#  - Initial version
 
 use strict;
 use Getopt::Long;
@@ -80,7 +84,7 @@ use LWP::UserAgent;
 use HTTP::Status qw(status_message);
 use HTTP::Date;
 
-my $version  = "2013.042";
+my $version  = "2014.168";
 
 my $scriptname = basename($0);
 
@@ -94,6 +98,7 @@ my $selectstdin = undef;
 my $username = undef;
 my $longestonly  = undef;
 my $minimumlength  = undef;
+my $format    = undef;
 my $network   = undef;
 my $station   = undef;
 my $location  = undef;
@@ -120,7 +125,7 @@ my @doubledash = ('STDIN', 'username', 'minimumlength','longestonly',
 		  'network', 'net', 'station', 'sta',
 		  'location', 'loc', 'channel', 'cha',
 		  'starttime', 'start', 'endtime', 'end',
-		  'quality');
+		  'quality', 'format');
 
 foreach my $idx ( 0..$#ARGV ) {
   if ( $ARGV[$idx] =~ /^--.+/ )  {
@@ -145,6 +150,7 @@ my $getoptsret = GetOptions ( 'v+'           => \$verbose,
                               'username=s'   => \$username,
                               'longestonly=s' => \$longestonly,
                               'minimumlength=s' => \$minimumlength,
+                              'format=s'         => \$format,
                               'network|net|N=s'  => \$network,
                               'station|sta|S=s'  => \$station,
                               'location|loc|L=s' => \$location,
@@ -177,6 +183,7 @@ if ( defined $usage )
     print STDERR " --endtime    Specify end time (YYYY-MM-DDTHH:MM:SS.ssssss)\n";
     print STDERR " --longestonly TRUE|FALSE   Limit to longest segment only\n";
     print STDERR " --minimumlength secs    Enforce minimum segment length in seconds\n";
+    print STDERR " --format format   Specify result format (e.g. miniseed)\n";
     print STDERR "\n";
 
     exit (1);
@@ -257,8 +264,8 @@ exit (0);
 sub HandleRequest ()
 {
   # Web service to process data request, this the other end of the bridge
-  #my $backendservice = 'http://www.iris.edu/ws/bulkdataselect';
-  my $backendservice = 'http://service.iris.edu/fdsnwsbeta/dataselect/1';
+  #my $backendservice = 'http://service.iris.edu/fdsnwsbeta/dataselect/1';
+  my $backendservice = 'http://service.iris.edu/fdsnws/dataselect/1';
 
   # HTTP UserAgent reported to web services
   my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
@@ -274,6 +281,7 @@ sub HandleRequest ()
   $requestpost .= "quality=$quality\n" if ($quality );
   $requestpost .= "minimumlength=$minimumlength\n" if ( $minimumlength );
   $requestpost .= "longestonly=$longestonly\n" if ( $longestonly );
+  $requestpost .= "format=$format\n" if ( $format );
 
   # Loop through data request lines and add to POST body (splitting for illustration)
   foreach my $req ( @requests ) {
@@ -413,6 +421,7 @@ sub ReadRequest () {
       my ($qual) = $sline =~ /^quality\=(.+)/i;
       my ($msl) = $sline =~ /^minimumlength\=(.+)/i;
       my ($lso) = $sline =~ /^longestonly\=(.+)/i;
+      my ($for) = $sline =~ /^format\=(.+)/i;
       my ($net,$sta,$loc,$chan,$start,$end) = split (' ', $sline);
 
       if ( $qual ) {
@@ -423,6 +432,9 @@ sub ReadRequest () {
       }
       elsif ( $lso ) {
 	$longestonly = $lso;
+      }
+      elsif ( $for ) {
+        $format = $for;
       }
       elsif ( $end ) {
 	if ( $verbose >= 1 ) {
@@ -488,6 +500,12 @@ sub ValidateRequest () {
   # Validate minimumlength option, must be a decimal value
   if ( $minimumlength && $minimumlength !~ /^\d+(\.\d+)?$/ ) {
     print STDERR "Unrecognized value for minimumlength [decimal seconds]: '$minimumlength'\n";
+    $retval = 3;
+  }
+
+  # Validate format option, must be MINISEED
+  if ( $format && $format !~ /^MINISEED$/i ) {
+    print STDERR "Unrecognized value for format [MINISEED]: '$format'\n";
     $retval = 3;
   }
 
