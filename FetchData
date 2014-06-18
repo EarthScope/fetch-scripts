@@ -86,6 +86,8 @@
 # ## Change history ##
 #
 # 2013.168:
+#  - Explicitly match metadata epochs to time series requests to avoid
+#  matching substrings, e.g. MONP matching MONP2.
 #  - Follow redirects for POST method in addition to default GET and HEAD.
 #  - A small bit of special output for 429 (Too Many Requests) results to
 #  help the user understand what is going on.
@@ -1337,16 +1339,16 @@ sub FetchMetaDataHelper {
 
     # Match metadata to selections (requests) using nested hash of (compiled) regexes
     foreach my $knet ( keys %selectmatch ) {
-      next if $mnet !~ $knet;
+      next if $mnet !~ /^$knet$/;
 
       foreach my $ksta ( keys %{$selectmatch{$knet}} ) {
-	next if $msta !~ $ksta;
+	next if $msta !~ /^$ksta$/;
 
 	foreach my $kloc ( keys %{$selectmatch{$knet}{$ksta}} ) {
-	  next if $mloc !~ $kloc;
+	  next if $mloc !~ /^$kloc$/;
 
 	  foreach my $kchan ( keys %{$selectmatch{$knet}{$ksta}{$kloc}} ) {
-	    next if $mchan !~ $kchan;
+	    next if $mchan !~ /^$kchan$/;
 
 	    # Check for time overlap (intersection) with metadata
 	    foreach my $timekey ( keys %{$selectmatch{$knet}{$ksta}{$kloc}{$kchan}} ) {
