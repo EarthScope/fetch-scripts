@@ -182,10 +182,12 @@
 #
 # 2014.168:
 #  - Explicitly match metadata epochs to time series requests to avoid
-#  matching substrings, e.g. MONP matching MONP2.
+#  matching substrings, e.g. MONP matching MONP2.  Only new code effected.
+#  - Accept empty location strings in metadata as "--" identifiers.
 #  - Follow redirects for POST method in addition to default GET and HEAD.
 #  - A small bit of special output for 429 (Too Many Requests) results to
 #  help the user understand what is going on.
+#  - Fix handling of metadata with no end times (open interval).
 #
 # Author: Chad Trabant, IRIS Data Management Center
 
@@ -1321,14 +1323,14 @@ sub FetchMetaDataHelper {
     my ($mnet,$msta,$mloc,$mchan,$mlat,$mlon,$melev,$mdepth,$mazimuth,$mdip,$minstrument,
 	$mscale,$mscalefreq,$mscaleunits,$msamplerate,$mstart,$mend) = split(/\|/, $line);
 
-    # Translate metadata location ID to "--" if it's spaces
-    $mloc = "--" if ( $mloc eq "  " );
+    # Translate metadata location ID to "--" if it is spaces or empty
+    $mloc = "--" if ( $mloc eq "  " || $mloc eq "" );
 
     # Cleanup start and end strings, with truncation to 2038-01-01T00:00:00 for older Perls
     my ($y,$mo,$d,$h,$m,$s) = $mstart =~ /^(\d{4,4})[-\/,:](\d{1,2})[-\/,:](\d{1,2})[-\/,:T](\d{1,2})[-\/,:](\d{1,2})[-\/,:](\d{1,2}).*/;
     my $cstart = ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
     my ($y,$mo,$d,$h,$m,$s) = $mend   =~ /^(\d{4,4})[-\/,:](\d{1,2})[-\/,:](\d{1,2})[-\/,:T](\d{1,2})[-\/,:](\d{1,2})[-\/,:](\d{1,2}).*/;
-    my $cend =   ( $y >= 2038 ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
+    my $cend =   ( $y >= 2038 || ! $mend ) ? "2038-01-01T00:00:00" : sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $y,$mo,$d,$h,$m,$s);
 
     # Determine epoch times for metadata start and end for matching below
     my $cstart = str2time ($cstart, "UTC");
