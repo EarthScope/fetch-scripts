@@ -65,7 +65,10 @@
 #
 # ChangeLog:
 #
-# 2014.168
+# 2014.189:
+#  - Allow 'mseed' as a valid value for format in addition to 'miniseed'.
+#
+# 2014.168:
 #  - Add handling for fdsnws-dataselect 1.1 'format' parameter by accepting
 #  the --format option and forwarding the parameter.
 #
@@ -84,7 +87,7 @@ use LWP::UserAgent;
 use HTTP::Status qw(status_message);
 use HTTP::Date;
 
-my $version  = "2014.168";
+my $version  = "2014.189";
 
 my $scriptname = basename($0);
 
@@ -503,8 +506,8 @@ sub ValidateRequest () {
     $retval = 3;
   }
 
-  # Validate format option, must be MINISEED
-  if ( $format && $format !~ /^MINISEED$/i ) {
+  # Validate format option, must be MINISEED or MSEED
+  if ( $format && ($format !~ /^MINISEED$/i && $format !~ /^MSEED$/i) ) {
     print STDERR "Unrecognized value for format [MINISEED]: '$format'\n";
     $retval = 3;
   }
