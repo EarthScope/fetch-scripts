@@ -154,6 +154,9 @@
 #  - Allow gzip'ed HTTP encoding for metadata requests if support
 #  exists on the local system.
 #
+# 2014.202
+#  - Exit with non-zero value on web service errors.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -165,7 +168,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.056";
+my $version = "2014.202";
 
 my $scriptname = basename($0);
 
@@ -203,6 +206,7 @@ my $appname      = undef;
 my $auth         = undef;
 my $outfile      = undef;
 my $xmlfile      = undef;
+my $exitvalue    = 0;
 
 my $inflater     = undef;
 
@@ -381,6 +385,8 @@ if ( $metafile ) {
 
 my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
 printf STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec;
+
+exit $exitvalue;
 ## End of main
 
 
@@ -613,6 +619,8 @@ sub FetchMetaData {
 	   . $response->code . " :: " . status_message($response->code) . "\n");
     print STDERR "------\n" . $response->decoded_content . "\n------\n";
     print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
+
+    $exitvalue = 1;
   }
   else {
     printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose );
