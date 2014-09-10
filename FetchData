@@ -189,6 +189,10 @@
 #  help the user understand what is going on.
 #  - Fix handling of metadata with no end times (open interval).
 #
+# 2014.253:
+#  - Optimize downloading, in particular for time series, by avoiding
+#  checks for gzip-encoded HTTP streams when not needed and data copies.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -200,7 +204,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.168";
+my $version = "2014.253";
 
 my $scriptname = basename($0);
 
@@ -820,7 +824,7 @@ sub FetchTimeSeriesData {
     $ua->env_proxy;
 
     # Fetch time series data from web service using callback routine
-    my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack );
+    my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack_NoGZIP );
 
     if ( $response->code == 204 ) {
       print (STDERR "No data available\n") if ( $verbose >= 1 );
@@ -936,8 +940,8 @@ sub FetchSACPZ {
 
     # Fetch data from web service using callback routine
     my $response = ( $inflater ) ?
-      $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&DLCallBack ) :
-      $ua->get($uri, ':content_cb' => \&DLCallBack );
+      $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&DLCallBack_GZIP ) :
+      $ua->get($uri, ':content_cb' => \&DLCallBack_NoGZIP );
 
     $inflater->inflateReset if ( $inflater );
 
@@ -1030,8 +1034,8 @@ sub FetchRESP {
 
     # Fetch data from web service using callback routine
     my $response = ( $inflater ) ?
-      $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&DLCallBack ) :
-      $ua->get($uri, ':content_cb' => \&DLCallBack );
+      $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&DLCallBack_GZIP ) :
+      $ua->get($uri, ':content_cb' => \&DLCallBack_NoGZIP );
 
     $inflater->inflateReset if ( $inflater );
 
@@ -1068,24 +1072,53 @@ sub FetchRESP {
 
 
 ######################################################################
-# DLCallBack:
+# DLCallBack_NoGZIP:
+#
+# A call back for LWP downloading that passes the data directly to the
+# low-level worker function with no detection of gzip encoding.
+######################################################################
+sub DLCallBack_NoGZIP {
+  # @_ :: 0=data, 1=response object, 2=protocol object
+
+  &DLCallBack_Worker ($_[0], 0);
+}
+
+
+######################################################################
+# DLCallBack_GZIP:
+#
+# A call back for LWP downloading that checks for gzip encoding and
+# sets the inflation flag for the low-level worker function.
+######################################################################
+sub DLCallBack_GZIP {
+  # @_ :: 0=data, 1=response object, 2=protocol object
+
+  my $inflateflag = ( $_[1]->content_encoding() =~ /gzip/ );
+
+  &DLCallBack_Worker ($_[0], $inflateflag);
+}
+
+
+######################################################################
+# DLCallBack_Worker:
 #
 # A call back for LWP downloading.
 #
 # Write received data to output file, tally up the received data size
 # and print and updated (overwriting) byte count string.
 ######################################################################
-sub DLCallBack {
-  my ($data, $response, $protocol) = @_;
-  $datasize += length($data);
+sub DLCallBack_Worker {
+  # @_ :: 0=data, 1=inflate flag
 
-  if ( $response->content_encoding() =~ /gzip/ ) {
+  $datasize += length($_[0]);
+
+  if ( $_[1] ) {
     my $datablock = "";
-    $inflater->inflate($data, $datablock);
+    $inflater->inflate($_[0], $datablock);
     print OUT $datablock;
   }
   else {
-    print OUT $data;
+    print OUT $_[0];
   }
 
   if ( $verbose >= 1 && ! $nobsprint ) {
