@@ -186,14 +186,20 @@
 #  - Accept empty location strings in metadata as "--" identifiers.
 #  - Follow redirects for POST method in addition to default GET and HEAD.
 #  - A small bit of special output for 429 (Too Many Requests) results to
-#  help the user understand what is going on.
+#  help the user understand what is going on if a server were to return this.
 #  - Fix handling of metadata with no end times (open interval).
 #
 # 2014.253:
-#  - Optimize downloading, in particular for time series, by avoiding
-#  checks for gzip-encoded HTTP streams when not needed and data copies.
+#  - Add detection of stream truncation by checking for "#STREAMERROR"
+#  at the end of th content buffer.  As there is no way to commicate
+#  an error in HTTP after the transfer has started (and a full byte
+#  count is not known) the DMC's servers will include an error message
+#  in the stream when an error occurs.  This should occur rarely.
+#  - Optimize downloading, in particular for time series, by a) avoiding
+#  checks for gzip-encoded HTTP streams when not needed and b) avoiding
+#  copying of the data buffer.
 #
-# Author: Chad Trabant, IRIS Data Management Center
+#  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
 use File::Basename;
@@ -1102,7 +1108,7 @@ sub DLCallBack_GZIP {
 ######################################################################
 # DLCallBack_Worker:
 #
-# A call back for LWP downloading.
+# A worker function used by the LWP call back routines.
 #
 # Write received data to output file, tally up the received data size
 # and print and updated (overwriting) byte count string.
@@ -1123,6 +1129,13 @@ sub DLCallBack_Worker {
 
   if ( $verbose >= 1 && ! $nobsprint ) {
     printf (STDERR "%-10.10s\b\b\b\b\b\b\b\b\b\b", sizestring($datasize));
+  }
+
+  # Detect stream truncation by checking for a trailing "#STREAMERROR"
+  if ( $_[0] =~ /#STREAMERROR$/ ) {
+    print STDERR "\nERROR: Stream truncated, download likely incomplete\n";
+
+    exit 1;
   }
 }
 
