@@ -191,7 +191,7 @@
 #
 # 2014.253:
 #  - Add detection of stream truncation by checking for "#STREAMERROR"
-#  at the end of th content buffer.  As there is no way to commicate
+#  at the end of the content buffer.  As there is no way to commicate
 #  an error in HTTP after the transfer has started (and a full byte
 #  count is not known) the DMC's servers will include an error message
 #  in the stream when an error occurs.  This should occur rarely.
