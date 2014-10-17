@@ -139,6 +139,9 @@
 #  - Add "compressed from <size>" to diagnostic message when the server returns
 #  gzip'ed content to differentiate the size transmitted versus the result.
 #
+# 2014.290
+#  - Change help message to refer to 'NEIC PDE' intead of just PDE.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -150,7 +153,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.232";
+my $version = "2014.290";
 
 my $scriptname = basename($0);
 
@@ -263,7 +266,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " --depth min:max   Specify a minimum and/or maximum depth in kilometers\n";
   print " --mag min:max     Specify a minimum and/or maximum magnitude\n";
   print " --magtype type    Specify a magnitude type for magnitude range limits\n";
-  print " --cat name        Limit to origins from specific catalog (e.g. ISC, PDE, GCMT)\n";
+  print " --cat name        Limit to origins from specific catalog (e.g. ISC, 'NEIC PDE', GCMT)\n";
   print " --con name        Limit to origins from specific contributor (e.g. ISC, NEIC)\n";
   print " --ua date         Limit to origins updated after date (YYYY-MM-DD,HH:MM:SS)\n";
   print "\n";
