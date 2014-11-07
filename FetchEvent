@@ -142,6 +142,9 @@
 # 2014.290
 #  - Change help message to refer to 'NEIC PDE' intead of just PDE.
 #
+# 2014.310
+#  - Add event ID parsing to include 'evid' token, needed for the ISC service.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -153,7 +156,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.290";
+my $version = "2014.310";
 
 my $scriptname = basename($0);
 
@@ -202,6 +205,9 @@ my $outfile      = undef;
 my $xmlfile      = undef;
 
 my $eventxml     = undef;
+
+# Event identification tokens for extracting minimal ID from publicID
+my @eventidtokens = ("eventid","evid");
 
 my $inflater     = undef;
 
@@ -423,7 +429,7 @@ if ( ! defined $altform ) {
     $totalevents++;
 
     # Print event ID
-    my $printeventid = &ExtractID($eventid, "eventid");
+    my $printeventid = &ExtractID($eventid, @eventidtokens);
     printf EVENT "%-8s", $printeventid;
 
     # Generate list of origin IDs with primary origin first and others sorted on ascending time
@@ -482,7 +488,7 @@ else {
     $totalevents++;
 
     # Print event ID
-    my $printeventid = &ExtractID($eventid, "eventid");
+    my $printeventid = &ExtractID($eventid, @eventidtokens);
     printf EVENT "EVENT $eventname{$eventid} eventid=$printeventid\n";
 
     # Generate list of origin IDs with primary origin firstand others sorted on ascending time
@@ -561,13 +567,24 @@ sub decimalposition { # decimalposition (value, position)
 # A SeisComP3 example for <event publicID= >:
 # smi:scs/0.6/gfz2013hykj
 #
+# An ISC example for <event publicID= >:
+# smi:ISC/evid=15925507
+#
 ######################################################################
-sub ExtractID { # ExtractID (publicid, token)
-  my ($publicid, $token) = @_;
+sub ExtractID { # ExtractID (publicid, token1[, token2, token3, ..])
+  my $publicid = shift;
+  my @tokens = @_;
 
   my $id = undef;
+  my $token = undef;
 
-  if ( $publicid =~ /.*${token}\=[0-9a-zA-Z]+/i ) { # Check for eventid=ID
+  foreach my $tok ( @tokens ) {
+    if ( $publicid =~ /.*${tok}\=[0-9a-zA-Z]+/i ) { # Check for token=ID
+      $token = $tok;
+      last;
+    }
+  }
+  if ( $token ) {
     ($id) = $publicid =~ /.*${token}\=([0-9a-zA-Z]+)/i;
   }
   elsif ( $publicid =~ /.*\/[^\/:]+$/ ) { # Check for ID following last slash
