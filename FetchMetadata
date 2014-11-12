@@ -157,6 +157,10 @@
 # 2014.202
 #  - Exit with non-zero value on web service errors.
 #
+# 2014.316
+#  - Add -mts/-matchtimeseries option to turn submit the matchtimeseries
+#  parameter to the metadata service.
+#
 # Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -168,7 +172,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.202";
+my $version = "2014.316";
 
 my $scriptname = basename($0);
 
@@ -198,6 +202,7 @@ my $chan         = undef;
 my $starttime    = undef;
 my $endtime      = undef;
 my $updatedafter = undef;
+my $matchtimeseries = undef;
 my $selectfile   = undef;
 my $bfastfile    = undef;
 my $stalevel     = undef;
@@ -229,6 +234,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'      => \$usage,
 			      'starttime|s=s'     => \$starttime,
 			      'endtime|e=s'       => \$endtime,
 			      'updatedafter|ua=s' => \$updatedafter,
+			      'matchtimeseries|mts' => \$matchtimeseries,
 			      'selectfile|l=s'    => \$selectfile,
 			      'bfastfile|b=s'     => \$bfastfile,
 			      'stalevel|sta'      => \$stalevel,
@@ -258,6 +264,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -s starttime      Specify start time (YYYY-MM-DD,HH:MM:SS)\n";
   print " -e endtime        Specify end time (YYYY-MM-DD,HH:MM:SS)\n";
   print " -ua date          Limit to metadata updated after date (YYYY-MM-DD,HH:MM:SS)\n";
+  print " -mts              Limit to metadata where criteria match time series data\n";
   print " -X xmlfile        Write raw returned FDSN StationXML to xmlfile\n";
   print " -l listfile       Read list of selections from file\n";
   print " -b bfastfile      Read list of selections from BREQ_FAST file\n";
@@ -593,6 +600,7 @@ sub FetchMetaData {
   $uri .= "&starttime=$rstart" if ( $rstart );
   $uri .= "&endtime=$rend" if ( $rend );
   $uri .= "&updatedafter=$updatedafter" if ( $updatedafter );
+  $uri .= "&matchtimeseries=TRUE" if ( $matchtimeseries );
 
   my $ftime = Time::HiRes::time;
 
