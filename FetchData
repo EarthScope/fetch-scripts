@@ -253,6 +253,7 @@ my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
 # Waveform data request group size in terms of station-days
 my $groupstadays = 30;
 
+my %datacenter = ():
 
 my $usage      = undef;
 my $verbose    = 0;
@@ -487,6 +488,8 @@ my $metadataresp;
 $nometadata = undef if ( $metafile || $sacpzdir || $respdir
 			 || scalar @latrange || scalar @lonrange || scalar @degrange );
 
+
+# CHAD, %datacenter->SERVICE->address
 
 # Fetch metadata unless requested not to
 if ( ! defined $nometadata )  {
