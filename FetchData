@@ -490,7 +490,7 @@ $nometadata = undef if ( $metafile || $sacpzdir || $respdir
 
 # Fetch metadata unless requested not to
 if ( ! defined $nometadata )  {
-  &FetchMetaData();
+  &FetchMetaData( $metadataservice );
 }
 # Build request hash directly from selections if not fetching metadata
 else {
@@ -521,13 +521,13 @@ my $datasize = 0;
 # CHAD, loop over data centers here
 
 # Fetch time series data if output file specified
-&FetchTimeSeriesData() if ( $outfile );
+&FetchTimeSeriesData( $timeseriesservice ) if ( $outfile );
 
 # Collect SAC P&Zs if output directory specified
-&FetchSACPZ() if ( $sacpzdir );
+&FetchSACPZ( $sacpzservice ) if ( $sacpzdir );
 
 # Collect RESP if output directory specified
-&FetchRESP() if ( $respdir );
+&FetchRESP( $respservice ) if ( $respdir );
 
 # Write metadata to file
 if ( $metafile ) {
@@ -754,6 +754,8 @@ sub ReadBFastFile {
 #
 ######################################################################
 sub FetchTimeSeriesData {
+  my $timeseriesws = shift;
+
   # Open output file
   open (OUT, ">$outfile") || die "Cannot open output file '$outfile': $!\n";
 
@@ -815,7 +817,7 @@ sub FetchTimeSeriesData {
   REDOGROUP:
     # Create web service URI
     my $query = ( $auth ) ? "queryauth" : "query";
-    my $uri = "${timeseriesservice}/$query";
+    my $uri = "${timeseriesws}/$query";
 
     # Create POST data selection: specify options followed by selections
     my $postdata = "quality=$qual\n";
@@ -909,6 +911,8 @@ sub FetchTimeSeriesData {
 #
 ######################################################################
 sub FetchSACPZ {
+  my $sacpzws = shift;
+
   # Create HTTP user agent
   my $ua = RequestAgent->new();
   $ua->env_proxy;
@@ -942,7 +946,7 @@ sub FetchSACPZ {
     }
 
     # Create web service URI
-    my $uri = "${sacpzservice}/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
+    my $uri = "${sacpzws}/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
     $uri .= "&starttime=$rstart" if ( $rstart );
     $uri .= "&endtime=$rend" if ( $rend );
 
@@ -1000,6 +1004,8 @@ sub FetchSACPZ {
 #
 ######################################################################
 sub FetchRESP {
+  my $respws = shift;
+
   # Create HTTP user agent
   my $ua = RequestAgent->new();
   $ua->env_proxy;
@@ -1036,7 +1042,7 @@ sub FetchRESP {
     }
 
     # Create web service URI
-    my $uri = "${respservice}/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
+    my $uri = "${respws}/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
     $uri .= "&starttime=$rstart" if ( $rstart );
     $uri .= "&endtime=$rend" if ( $rend );
 
@@ -1170,6 +1176,7 @@ sub DLCallBack_Worker {
 #
 ######################################################################
 sub FetchMetaData {
+  my $metadataws = shift;
 
   my $mtime = Time::HiRes::time;
 
@@ -1183,12 +1190,12 @@ sub FetchMetaData {
 
   # Fetch metadata for virtual network requests individually
   foreach my $selection ( @vnetselections ) {
-    $totalepochs += &FetchMetaDataHelper ([$selection]);
+    $totalepochs += &FetchMetaDataHelper ($metadataws, [$selection]);
   }
 
   # Process all regular networks as a group
   if ( scalar @netselections ) {
-    $totalepochs += &FetchMetaDataHelper (\@netselections);
+    $totalepochs += &FetchMetaDataHelper ($metadataws, \@netselections);
   }
 
   my $duration = Time::HiRes::time - $mtime;
@@ -1208,6 +1215,7 @@ sub FetchMetaData {
 # Returns the total number of metadata epochs processed.
 ######################################################################
 sub FetchMetaDataHelper {
+  my $metadataws = shift;
   my $selectionref = shift;
 
   # Create HTTP user agent
@@ -1215,7 +1223,7 @@ sub FetchMetaDataHelper {
   $ua->env_proxy;
 
   # Create web service URI
-  my $uri = "${metadataservice}/query";
+  my $uri = "${metadataws}/query";
 
   # Create POST data selection: specify options followed by selections
   my $postdata = "level=channel\n";
