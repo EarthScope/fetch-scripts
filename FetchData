@@ -13,6 +13,7 @@
 # METADATAWS = complete URI of service (http://service.iris.edu/fdsnws/station/1)
 # SACPZWS = complete URI of service (http://service.iris.edu/irisws/sacpz/1)
 # RESPWS = complete URI of service (http://service.iris.edu/irisws/resp/1)
+# FEDCATWS = complete URI of service (http://service.iris.edu/irisws/fedcatalog/1)
 #
 # This program is primarily written to select and fetch waveform data
 # but can also fetch metadata and response information if those
@@ -24,11 +25,7 @@
 # Dependencies: This script should run without problems on Perl
 # release 5.10 or newer, older versions of Perl might require the
 # installation of the following modules (and their dependencies):
-#   XML::SAX
 #   Bundle::LWP (libwww-perl)
-#
-# Installation of the XML::SAX::ExpatXS module can significantly
-# speed up the parsing of metadata results returned as XML.
 #
 ## Data selection
 #
@@ -210,7 +207,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.253";
+my $version = "2014.317";
 
 my $scriptname = basename($0);
 
@@ -243,6 +240,12 @@ my $respservice = "$servicebase/irisws/resp/1";
 
 # Check for environment variable override for respservice
 $respservice = $ENV{'RESPWS'} if ( exists $ENV{'RESPWS'} );
+
+# Web service for federation catalog
+my $fedcatservice = "$servicebase/irisws/fedcatalog/1";
+
+# Check for environment variable override for fedcatservice
+$fedcatservice = $ENV{'FEDCATWS'} if ( exists $ENV{'FEDCATWS'} );
 
 # HTTP UserAgent reported to web services
 my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
@@ -277,6 +280,7 @@ my $respdir    = undef;
 my $metafile   = undef;
 my $nometadata = undef;
 my $noretry    = undef;
+my $federate   = undef;
 my $exitvalue  = 0;
 
 my $inflater   = undef;
@@ -296,6 +300,7 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
                               'nobs'           => \$nobsprint,
                               'nometadata|nm'  => \$nometadata,
                               'noretry|nr'     => \$noretry,
+                              'federate|F'     => \$federate,
                               'net|N=s'        => \$net,
                               'sta|S=s'        => \$sta,
                               'loc|L=s'        => \$loc,
@@ -352,6 +357,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -lso              Limit returned data to the longest segment only\n";
   print " -nm               Do not request metadata unless output file requested\n";
   print " -nr               No retry, exit immediately on time series request errors\n";
+  print " -F                Federate the request to multiple data centers if needed\n";
   print " -A appname        Application/version string for identification\n";
   print " -a user:pass      User and password for access to restricted data\n";
   print "\n";
@@ -511,6 +517,8 @@ if ( $verbose > 2 ) {
 
 # Track bytes downloaded in callback handlers
 my $datasize = 0;
+
+# CHAD, loop over data centers here
 
 # Fetch time series data if output file specified
 &FetchTimeSeriesData() if ( $outfile );
