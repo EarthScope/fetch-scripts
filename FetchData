@@ -253,8 +253,6 @@ my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
 # Waveform data request group size in terms of station-days
 my $groupstadays = 30;
 
-my %datacenter = ():
-
 my $usage      = undef;
 my $verbose    = 0;
 my $nobsprint  = undef;
@@ -475,6 +473,7 @@ if ( $verbose > 2 ) {
 }
 
 # An array to hold channel list and metadata
+my %datacenter = ();  # Hash of data centers to request data from
 my %request = ();     # Value is metadata epoch for data selection as time strings
 my %metarequest = (); # Value is metadata range for RESP and SACPZ selection as epoch times
 my @metadata = ();
@@ -488,6 +487,17 @@ my $metadataresp;
 $nometadata = undef if ( $metafile || $sacpzdir || $respdir
 			 || scalar @latrange || scalar @lonrange || scalar @degrange );
 
+# 
+if ( $federate ) {
+  print STDER "I should federate! right? right!\n";
+}
+else {
+  # Add default/environmental entries to datacenter hash
+  $datacenter{""}{"timeseriesws"} = $timeseriesservice;
+  $datacenter{""}{"metadataws"} = $metadataservice;
+  $datacenter{""}{"sacpzws"} = $sacpzservice;
+  $datacenter{""}{"respws"} = $respservice;
+}
 
 # CHAD, %datacenter->SERVICE->address
 
