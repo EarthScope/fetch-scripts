@@ -203,9 +203,12 @@
 #  - Restructure internal flow for multiple data center handling.
 #  - Add FederateRequest() to handle federation catalog servicing.
 #
+# 2014.323
+#  - Add -O and -M options to write all federated output to the same files.
+#  By default, a data center prefix is added to the output from each DC.
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
-# Add prefixing of data center label to all output files
 # Add checks for service interfaces, fail gracefully when not set
 
 use strict;
@@ -217,7 +220,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.322";
+my $version = "2014.323";
 
 my $scriptname = basename($0);
 
@@ -284,9 +287,11 @@ my $lsoopt     = undef;
 my $appname    = undef;
 my $auth       = undef;
 my $outfile    = undef;
+my $outfileapp = undef;
 my $sacpzdir   = undef;
 my $respdir    = undef;
 my $metafile   = undef;
+my $metafileapp= undef;
 my $nometadata = undef;
 my $noretry    = undef;
 my $federate   = undef;
@@ -327,9 +332,11 @@ my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
 			      'appname|A=s'    => \$appname,
 			      'auth|a=s'       => \$auth,
 			      'outfile|o=s'    => \$outfile,
+			      'outfileapp|O=s' => \$outfileapp,
 			      'sacpzdir|sd=s'  => \$sacpzdir,
 			      'respdir|rd=s'   => \$respdir,
 			      'metafile|m=s'   => \$metafile,
+			      'metafileapp|M=s'=> \$metafileapp,
 			      'timeseriesws=s' => \$timeseriesservice,
 			      'metadataws=s'   => \$metadataservice,
 			      'sacpzws=s'      => \$sacpzservice,
@@ -366,16 +373,41 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -lso              Limit returned data to the longest segment only\n";
   print " -nm               Do not request metadata unless output file requested\n";
   print " -nr               No retry, exit immediately on time series request errors\n";
-  print " -F                Federate the request to multiple data centers if needed\n";
   print " -A appname        Application/version string for identification\n";
   print " -a user:pass      User and password for access to restricted data\n";
   print "\n";
+  print " -F                Federate the request to multiple data centers if needed\n";
+  print "\n";
   print " -o outfile        Fetch time series data and write to output file\n";
+  print " -O outfile        Write all timeseries to a single file, useful with -F\n";
   print " -sd sacpzdir      Fetch SAC P&Zs and write files to sacpzdir\n";
   print " -rd respdir       Fetch RESP and write files to respdir\n";
   print " -m metafile       Write basic metadata to specified file\n";
+  print " -M metafile       Write all metadata to a single file, useful with -F\n";
   print "\n";
   exit 1;
+}
+
+# Truncate any existing appending output file and assign to outfile
+if ( $outfileapp ) {
+  die "Cannot specify both -o and -O\n" if ( $outfile );
+
+  if ( -f "$outfileapp" ) {
+    truncate ($outfileapp, 0) || die "Cannot truncate existing file $outfileapp\n";
+  }
+
+  $outfile = $outfileapp;
+}
+
+# Truncate any existing appending metadata file and assign to metafile
+if ( $metafileapp ) {
+  die "Cannot specify both -m and -M\n" if ( $metafile );
+
+  if ( -f "$metafileapp" ) {
+    truncate ($metafileapp, 0) || die "Cannot truncate existing file $metafileapp\n";
+  }
+
+  $metafile = $metafileapp;
 }
 
 if ( ! $outfile && ! $metafile && ! $sacpzdir && ! $respdir ) {
@@ -559,13 +591,36 @@ foreach my $dckey ( keys %datacenter ) {
   }
 
   # Fetch time series data if output file specified
-  &FetchTimeSeriesData( $dckey ) if ( $outfile );
+  if ( $outfile ) {
+    # Determine output file mode (overwrite or append) and add data center prefix if needed
+    my $outfilemode = ( defined $outfileapp ) ? ">>" : ">";
+    my $outfilename = $outfile;
+    $outfilename = "$dckey-$outfile" if ( ! defined $outfileapp && $dckey );
+
+    &FetchTimeSeriesData( $dckey, $outfilename, $outfilemode ) if ( $outfile );
+  }
 
   # Collect SAC P&Zs if output directory specified
-  &FetchSACPZ( $dckey ) if ( $sacpzdir );
+  if ( $sacpzdir ) {
+    my $dcsacpzdir = ( $dckey ) ? "$dckey/$sacpzdir" : $sacpzdir;
+
+    if ( ! -d "$dcsacpzdir" ) {
+      mkdir $dcsacpzdir, 0755 || die "Cannot create directory $dcsacpzdir: $!\n";
+    }
+
+    &FetchSACPZ( $dckey, $dcsacpzdir );
+  }
 
   # Collect RESP if output directory specified
-  &FetchRESP( $dckey ) if ( $respdir );
+  if ( $respdir ) {
+    my $dcrespdir = ( $dckey ) ? "$dckey/$respdir" : $respdir;
+
+    if ( ! -d "$dcrespdir" ) {
+      mkdir $dcrespdir, 0755 || die "Cannot create directory $dcrespdir: $!\n";
+    }
+
+    &FetchRESP( $dckey, $dcrespdir );
+  }
 
   # Write metadata to file
   if ( $metafile ) {
@@ -576,7 +631,11 @@ foreach my $dckey ( keys %datacenter ) {
       printf STDERR "Writing metadata (%d channel epochs) file\n",
 	scalar @{$datacenter{$dckey}{metadata}} if ( $verbose >= 1 );
 
-      open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
+      # Open metadata file, appending if requested, adding data center prefix if needed
+      my $mode = ( defined $metafileapp ) ? ">>" : ">";
+      my $metafilename = $metafile;
+      $metafilename = "$dckey-$metafile" if ( ! defined $metafileapp && $dckey );
+      open (META, $mode, $metafilename) || die "Cannot open metadata file '$metafilename': $!\n";
 
       # Print header line
       print META "#net|sta|loc|chan|lat|lon|elev|depth|azimuth|dip|instrument|scale|scalefreq|scaleunits|samplerate|start|end\n";
@@ -813,6 +872,21 @@ sub FederateRequest {
   # Create POST data selection
   my $postdata = "";
 
+  if ( scalar @latrange ) {
+    $postdata .= "minlatitude=$latrange[0]\n" if ( defined $latrange[0] );
+    $postdata .= "maxlatitude=$latrange[1]\n" if ( defined $latrange[1] );
+  }
+  if ( scalar @lonrange ) {
+    $postdata .= "minlongitude=$lonrange[0]\n" if ( defined $lonrange[0] );
+    $postdata .= "maxlongitude=$lonrange[1]\n" if ( defined $lonrange[1] );
+  }
+  if ( scalar @degrange ) {
+    $postdata .= "latitude=$degrange[0]\n" if ( defined $degrange[0] );
+    $postdata .= "longitude=$degrange[1]\n" if ( defined $degrange[1] );
+    $postdata .= "maxradius=$degrange[2]\n" if ( defined $degrange[2] );
+    $postdata .= "minradius=$degrange[3]\n" if ( defined $degrange[3] );
+  }
+
   # Translate selections to POST body repeat lines and build selection hash for matching
   foreach my $selection ( @{$selectionref} ) {
     my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
@@ -908,6 +982,8 @@ sub FederateRequest {
     else {
       my ($net,$sta,$loc,$chan,$start,$end) = split (/\s+/, $line);
 
+      #CHAD, will need to add ignore for passed back key=value pairs
+
       if ( ! defined $end ) {
 	print STDERR "Federation catalog service return unrecognized selection line:\n'$line'\n";
 	return undef;
@@ -936,9 +1012,11 @@ sub FederateRequest {
 ######################################################################
 sub FetchTimeSeriesData {
   my $dckey = shift;
+  my $outfilename = shift;
+  my $outfilemode = shift;
 
-  # Open output file
-  open (OUT, ">$outfile") || die "Cannot open output file '$outfile': $!\n";
+  # Open output file with specified name and mode
+  open (OUT, $outfilemode, $outfilename) || die "Cannot open output file '$outfilename': $!\n";
 
   my $count = 0;
 
@@ -1093,6 +1171,7 @@ sub FetchTimeSeriesData {
 ######################################################################
 sub FetchSACPZ {
   my $dckey = shift;
+  my $dcdir = shift;
 
   # Create HTTP user agent
   my $ua = RequestAgent->new();
@@ -1103,7 +1182,7 @@ sub FetchSACPZ {
   foreach my $req ( keys %{$datacenter{$dckey}{metarequest}} )
     { $total++ if ( defined $datacenter{$dckey}{metarequest}->{$req} ); }
 
-  print STDERR "Fetching SAC Poles and Zeros\n" if ( $verbose >= 1 );
+  print STDERR "Fetching SAC Poles and Zeros, writing to '$dcdir'\n" if ( $verbose >= 1 );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
@@ -1121,7 +1200,7 @@ sub FetchSACPZ {
     $count++;
 
     # Generate output file name and open
-    my $sacpzfile = "$sacpzdir/SACPZ.$rnet.$rsta.$rloc.$rchan";
+    my $sacpzfile = "$dcdir/SACPZ.$rnet.$rsta.$rloc.$rchan";
     if ( ! open (OUT, ">$sacpzfile") ) {
       print STDERR "Cannot open output file '$sacpzfile': $!\n";
       next;
@@ -1187,6 +1266,7 @@ sub FetchSACPZ {
 ######################################################################
 sub FetchRESP {
   my $dckey = shift;
+  my $dcdir = shift;
 
   # Create HTTP user agent
   my $ua = RequestAgent->new();
@@ -1197,7 +1277,7 @@ sub FetchRESP {
   foreach my $req ( keys %{$datacenter{$dckey}{metarequest}} )
     { $total++ if ( defined $datacenter{$dckey}{metarequest}->{$req} ); }
 
-  print STDERR "Fetching RESP\n" if ( $verbose >= 1 );
+  print STDERR "Fetching RESP, writing to '$dcdir'\n" if ( $verbose >= 1 );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
@@ -1218,7 +1298,7 @@ sub FetchRESP {
     my $ploc = ( $rloc eq "--" ) ? "" : $rloc;
 
     # Generate output file name and open
-    my $respfile = "$respdir/RESP.$rnet.$rsta.$ploc.$rchan";
+    my $respfile = "$dcdir/RESP.$rnet.$rsta.$ploc.$rchan";
     if ( ! open (OUT, ">$respfile") ) {
       print STDERR "Cannot open output file '$respfile': $!\n";
       next;
