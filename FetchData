@@ -535,8 +535,8 @@ foreach my $dckey ( keys %datacenter ) {
   if ( ! defined $nometadata )  {
     &FetchMetaData( $dckey );
   }
-  # Build request hash directly from selections if not fetching metadata
-  else {
+  # Build request hash directly from selections if not fetching metadata and not already populated
+  else if ( ! exists $datacenter{$dckey}{request} ) {
     foreach my $selection ( @{$datacenter{$dckey}{selection}} ) {
       my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
 
