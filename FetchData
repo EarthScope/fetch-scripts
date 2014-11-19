@@ -196,6 +196,10 @@
 #  checks for gzip-encoded HTTP streams when not needed and b) avoiding
 #  copying of the data buffer.
 #
+# 2014.322:
+#  - Restructure internal flow for multiple data center handling.
+#  - Add federation capabilty.
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -207,7 +211,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.317";
+my $version = "2014.322";
 
 my $scriptname = basename($0);
 
@@ -472,12 +476,24 @@ if ( $verbose > 2 ) {
   print STDERR "Radius range: $degrange[0] : $degrange[1] : $degrange[2] : $degrange[3]\n" if ( scalar @degrange );
 }
 
-# An array to hold channel list and metadata
-my %datacenter = ();  # Hash of data centers to request data from
-my %request = ();     # Value is metadata epoch for data selection as time strings
-my %metarequest = (); # Value is metadata range for RESP and SACPZ selection as epoch times
-my @metadata = ();
-my $metadataresp;
+# A mega hash for data center details, requests and some results
+#
+# datacenter{DATACENTER}{timeseriesws} = URL
+# datacenter{DATACENTER}{metadataws} = URL
+# datacenter{DATACENTER}{sacpzws} = URL
+# datacenter{DATACENTER}{respws} = URL
+#
+# datacenter{DATACENTER}{selection} = ref to ARRAY of selections
+# datacenter{DATACENTER}{request} = ref to HASH of requests
+# datacenter{DATACENTER}{metarequest} = ref to HASH of metadata requests (time extents)
+# datacenter{DATACENTER}{metadata} = ref to ARRAY of metadata
+my %datacenter = ();
+
+# A buffer for metadata service responses
+my $metadataresponse;
+
+# Track bytes downloaded in callback handlers
+my $datasize = 0;
 
 # Fetch metadata from the station web service by default unless the nometdata option
 # is specified or if metadata output file has been requested or if geographic range
@@ -487,87 +503,98 @@ my $metadataresp;
 $nometadata = undef if ( $metafile || $sacpzdir || $respdir
 			 || scalar @latrange || scalar @lonrange || scalar @degrange );
 
-# 
+# Resolve federated requests
 if ( $federate ) {
-  print STDER "I should federate! right? right!\n";
+  print STDERR "I should federate! right? right!\n";
+  exit 0;
+
+  # Based on @selections with fedcatalog service
+  # Populate: datacenter{DC}{selection} and service locations
+
 }
+# Otherwise set up default (empty) data center
 else {
   # Add default/environmental entries to datacenter hash
-  $datacenter{""}{"timeseriesws"} = $timeseriesservice;
-  $datacenter{""}{"metadataws"} = $metadataservice;
-  $datacenter{""}{"sacpzws"} = $sacpzservice;
-  $datacenter{""}{"respws"} = $respservice;
+  $datacenter{""}{timeseriesws} = $timeseriesservice;
+  $datacenter{""}{metadataws} = $metadataservice;
+  $datacenter{""}{sacpzws} = $sacpzservice;
+  $datacenter{""}{respws} = $respservice;
+
+  # User selections used directly
+  $datacenter{""}{selection} = \@selections;
 }
 
-# CHAD, %datacenter->SERVICE->address
+# Process each data center
+foreach my $dckey ( keys %datacenter ) {
 
-# Fetch metadata unless requested not to
-if ( ! defined $nometadata )  {
-  &FetchMetaData( $metadataservice );
-}
-# Build request hash directly from selections if not fetching metadata
-else {
-  foreach my $selection ( @selections ) {
-    my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
-
-    # Subsitute non-specified fields with wildcards
-    $snet = "*" if ( ! $snet );
-    $ssta = "*" if ( ! $ssta );
-    $sloc = "*" if ( ! $sloc );
-    $schan = "*" if ( ! $schan );
-
-    $request{"$snet|$ssta|$sloc|$schan|$sstart|$send"} = "$sstart|$send";
+  if ( $dckey && $verbose ) {
+    print STDERR "Fetching data from '$dckey'\n";
   }
-}
 
-# Report complete data request
-if ( $verbose > 2 ) {
-  print STDERR "== Request list ==\n";
-  foreach my $req ( sort keys %request ) {
-    print STDERR "    $req (metadata: $request{$req})\n";
+  # Fetch metadata unless requested not to
+  if ( ! defined $nometadata )  {
+    &FetchMetaData( $dckey );
   }
-}
-
-# Track bytes downloaded in callback handlers
-my $datasize = 0;
-
-# CHAD, loop over data centers here
-
-# Fetch time series data if output file specified
-&FetchTimeSeriesData( $timeseriesservice ) if ( $outfile );
-
-# Collect SAC P&Zs if output directory specified
-&FetchSACPZ( $sacpzservice ) if ( $sacpzdir );
-
-# Collect RESP if output directory specified
-&FetchRESP( $respservice ) if ( $respdir );
-
-# Write metadata to file
-if ( $metafile ) {
-  if ( scalar @metadata <= 0 ) {
-    printf STDERR "No metdata available\n", scalar @metadata;
-  }
+  # Build request hash directly from selections if not fetching metadata
   else {
-    printf STDERR "Writing metadata (%d channel epochs) file\n", scalar @metadata if ( $verbose >= 1 );
+    foreach my $selection ( @{$datacenter{$dckey}{selection}} ) {
+      my ($snet,$ssta,$sloc,$schan,$sstart,$send) = split (/\|/,$selection);
 
-    open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
+      # Subsitute non-specified fields with wildcards
+      $snet = "*" if ( ! $snet );
+      $ssta = "*" if ( ! $ssta );
+      $sloc = "*" if ( ! $sloc );
+      $schan = "*" if ( ! $schan );
 
-    # Print header line
-    print META "#net|sta|loc|chan|lat|lon|elev|depth|azimuth|dip|instrument|scale|scalefreq|scaleunits|samplerate|start|end\n";
-
-    foreach my $channel ( sort @metadata ) {
-      my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) =
-	split (/\|/, $channel);
-
-      $sensfreq = sprintf ("%0g", $sensfreq);
-      $samplerate = sprintf ("%0g", $samplerate);
-
-      print META "$net|$sta|$loc|$chan|$lat|$lon|$elev|$depth|$azimuth|$dip|$instrument|$sens|$sensfreq|$sensunit|$samplerate|$start|$end\n";
+      $datacenter{$dckey}{request}->{"$snet|$ssta|$sloc|$schan|$sstart|$send"} = "$sstart|$send";
     }
-
-    close META;
   }
-}
+
+  # Report complete data request
+  if ( $verbose > 2 ) {
+    print STDERR "== Request list ==\n";
+    foreach my $req ( sort keys %{$datacenter{$dckey}{request}} ) {
+      print STDERR "    $req (metadata: $datacenter{$dckey}{request}->{$req})\n";
+    }
+  }
+
+  # Fetch time series data if output file specified
+  &FetchTimeSeriesData( $dckey ) if ( $outfile );
+
+  # Collect SAC P&Zs if output directory specified
+  &FetchSACPZ( $dckey ) if ( $sacpzdir );
+
+  # Collect RESP if output directory specified
+  &FetchRESP( $dckey ) if ( $respdir );
+
+  # Write metadata to file
+  if ( $metafile ) {
+    if ( scalar @{$datacenter{$dckey}{metadata}} <= 0 ) {
+      printf STDERR "No metdata available\n";
+    }
+    else {
+      printf STDERR "Writing metadata (%d channel epochs) file\n",
+	scalar @{$datacenter{$dckey}{metadata}} if ( $verbose >= 1 );
+
+      open (META, ">$metafile") || die "Cannot open metadata file '$metafile': $!\n";
+
+      # Print header line
+      print META "#net|sta|loc|chan|lat|lon|elev|depth|azimuth|dip|instrument|scale|scalefreq|scaleunits|samplerate|start|end\n";
+
+      foreach my $channel ( sort @{$datacenter{$dckey}{metadata}} ) {
+	my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) =
+	  split (/\|/, $channel);
+
+	$sensfreq = sprintf ("%0g", $sensfreq);
+	$samplerate = sprintf ("%0g", $samplerate);
+
+	print META "$net|$sta|$loc|$chan|$lat|$lon|$elev|$depth|$azimuth|$dip|$instrument|$sens|$sensfreq|$sensunit|$samplerate|$start|$end\n";
+      }
+
+      close META;
+    }
+  }
+} # Done looping through data centers
 
 my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
 printf (STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec) if ( $verbose >= 0 );
@@ -767,7 +794,7 @@ sub ReadBFastFile {
 #
 ######################################################################
 sub FetchTimeSeriesData {
-  my $timeseriesws = shift;
+  my $dckey = shift;
 
   # Open output file
   open (OUT, ">$outfile") || die "Cannot open output file '$outfile': $!\n";
@@ -784,7 +811,7 @@ sub FetchTimeSeriesData {
   my $groupdays = 0;
   my $groupidx = 0;
   my $groupsta = undef;
-  foreach my $req ( sort keys %request ) {
+  foreach my $req ( sort keys %{$datacenter{$dckey}{request}} ) {
     my ($wnet,$wsta,$wloc,$wchan,$wstart,$wend) = split (/\|/, $req);
     $count++;
 
@@ -830,7 +857,7 @@ sub FetchTimeSeriesData {
   REDOGROUP:
     # Create web service URI
     my $query = ( $auth ) ? "queryauth" : "query";
-    my $uri = "${timeseriesws}/$query";
+    my $uri = $datacenter{$dckey}{timeseriesws} . "/$query";
 
     # Create POST data selection: specify options followed by selections
     my $postdata = "quality=$qual\n";
@@ -924,7 +951,7 @@ sub FetchTimeSeriesData {
 #
 ######################################################################
 sub FetchSACPZ {
-  my $sacpzws = shift;
+  my $dckey = shift;
 
   # Create HTTP user agent
   my $ua = RequestAgent->new();
@@ -932,18 +959,19 @@ sub FetchSACPZ {
 
   my $count = 0;
   my $total = 0;
-  foreach my $req ( keys %metarequest ) { $total++ if ( defined $metarequest{$req} ); }
+  foreach my $req ( keys %{$datacenter{$dckey}{metarequest}} )
+    { $total++ if ( defined $datacenter{$dckey}{metarequest}->{$req} ); }
 
   print STDERR "Fetching SAC Poles and Zeros\n" if ( $verbose >= 1 );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
-  foreach my $req ( sort keys %metarequest ) {
+  foreach my $req ( sort keys %{$datacenter{$dckey}{metarequest}} ) {
     # Skip entries with values not defined, perhaps no data was fetched
-    next if ( ! defined $metarequest{$req} );
+    next if ( ! defined $datacenter{$dckey}{metarequest}->{$req} );
 
     my ($rnet,$rsta,$rloc,$rchan) = split (/\|/, $req);
-    my ($mstart,$mend) = split (/\|/, $metarequest{$req});
+    my ($mstart,$mend) = split (/\|/, $datacenter{$dckey}{metarequest}->{$req});
 
     # Create time strings for request, shrink window by one second to avoid
     # matching too many metadata ranges by avoiding the boundary.
@@ -959,7 +987,7 @@ sub FetchSACPZ {
     }
 
     # Create web service URI
-    my $uri = "${sacpzws}/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
+    my $uri = $datacenter{$dckey}{sacpzws} . "/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
     $uri .= "&starttime=$rstart" if ( $rstart );
     $uri .= "&endtime=$rend" if ( $rend );
 
@@ -1017,7 +1045,7 @@ sub FetchSACPZ {
 #
 ######################################################################
 sub FetchRESP {
-  my $respws = shift;
+  my $dckey = shift;
 
   # Create HTTP user agent
   my $ua = RequestAgent->new();
@@ -1025,18 +1053,19 @@ sub FetchRESP {
 
   my $count = 0;
   my $total = 0;
-  foreach my $req ( keys %metarequest ) { $total++ if ( defined $metarequest{$req} ); }
+  foreach my $req ( keys %{$datacenter{$dckey}{metarequest}} )
+    { $total++ if ( defined $datacenter{$dckey}{metarequest}->{$req} ); }
 
   print STDERR "Fetching RESP\n" if ( $verbose >= 1 );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
 
-  foreach my $req ( sort keys %metarequest ) {
+  foreach my $req ( sort keys %{$datacenter{$dckey}{metarequest}} ) {
     # Skip entries with values not defined, perhaps no data was fetched
-    next if ( ! defined $metarequest{$req} );
+    next if ( ! defined $datacenter{$dckey}{metarequest}->{$req} );
 
     my ($rnet,$rsta,$rloc,$rchan) = split (/\|/, $req);
-    my ($mstart,$mend) = split (/\|/, $metarequest{$req});
+    my ($mstart,$mend) = split (/\|/, $datacenter{$dckey}{metarequest}->{$req});
 
     # Create time strings for request, shrink window by one second to avoid
     # matching too many metadata ranges by avoiding the boundary.
@@ -1055,7 +1084,7 @@ sub FetchRESP {
     }
 
     # Create web service URI
-    my $uri = "${respws}/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
+    my $uri = $datacenter{$dckey}{respws} . "/query?net=$rnet&sta=$rsta&loc=$rloc&cha=$rchan";
     $uri .= "&starttime=$rstart" if ( $rstart );
     $uri .= "&endtime=$rend" if ( $rend );
 
@@ -1189,26 +1218,26 @@ sub DLCallBack_Worker {
 #
 ######################################################################
 sub FetchMetaData {
-  my $metadataws = shift;
+  my $dckey = shift;
 
   my $mtime = Time::HiRes::time;
 
   # Split selections into lists for virtual networks and regular networks
   # Requests including virtual networks are identified by searching
   # for [_.~] in the first (network) field.
-  my @vnetselections = grep { (split(/\|/))[0] =~ /[\_\.\~]/ } @selections;
-  my @netselections = grep { (split(/\|/))[0] !~ /[\_\.\~]/ } @selections;
+  my @vnetselections = grep { (split(/\|/))[0] =~ /[\_\.\~]/ } @{$datacenter{$dckey}{selection}};
+  my @netselections = grep { (split(/\|/))[0] !~ /[\_\.\~]/ } @{$datacenter{$dckey}{selection}};
 
   my $totalepochs = 0;
 
   # Fetch metadata for virtual network requests individually
   foreach my $selection ( @vnetselections ) {
-    $totalepochs += &FetchMetaDataHelper ($metadataws, [$selection]);
+    $totalepochs += &FetchMetaDataHelper ($dckey, [$selection]);
   }
 
   # Process all regular networks as a group
   if ( scalar @netselections ) {
-    $totalepochs += &FetchMetaDataHelper ($metadataws, \@netselections);
+    $totalepochs += &FetchMetaDataHelper ($dckey, \@netselections);
   }
 
   my $duration = Time::HiRes::time - $mtime;
@@ -1228,7 +1257,7 @@ sub FetchMetaData {
 # Returns the total number of metadata epochs processed.
 ######################################################################
 sub FetchMetaDataHelper {
-  my $metadataws = shift;
+  my $dckey = shift;
   my $selectionref = shift;
 
   # Create HTTP user agent
@@ -1236,7 +1265,7 @@ sub FetchMetaDataHelper {
   $ua->env_proxy;
 
   # Create web service URI
-  my $uri = "${metadataws}/query";
+  my $uri = $datacenter{$dckey}{metadataws} . "/query";
 
   # Create POST data selection: specify options followed by selections
   my $postdata = "level=channel\n";
@@ -1339,7 +1368,7 @@ sub FetchMetaDataHelper {
   print STDERR "Fetching metadata :: " if ( $verbose >= 1 );
 
   $datasize = 0;
-  $metadataresp = "";
+  $metadataresponse = "";
 
   # Fetch metadata from web service using callback routine
   my $response = ( $inflater ) ?
@@ -1370,7 +1399,7 @@ sub FetchMetaDataHelper {
 	  sizestring($datasize), $duration, sizestring($rate)) if ( $verbose >= 0 );
 
   # Return if no metadata received
-  return if ( length $metadataresp <= 0 );
+  return if ( length $metadataresponse <= 0 );
 
   my $totalepochs = 0;
   my $ptime = Time::HiRes::time;
@@ -1391,7 +1420,7 @@ sub FetchMetaDataHelper {
   #     b) track the largest combined metadata time window for each channel
   #        for requesting secondary metadata (SACPZ and RESP).
 
-  foreach my $line ( split (/[\n\r]+/, $metadataresp) ) {
+  foreach my $line ( split (/[\n\r]+/, $metadataresponse) ) {
     chomp $line;
     next if ( $line =~ /^#.*/ );  # Skip comment lines beginning with '#'
 
@@ -1437,25 +1466,26 @@ sub FetchMetaDataHelper {
 
 		# Push channel epoch metadata into storage list
 		if ( ! $metadatalisted ) {
-		  push (@metadata, "$mnet|$msta|$mloc|$mchan|$mstart|$mend|$mlat|$mlon|$melev|$mdepth|$mazimuth|$mdip|$minstrument|$msamplerate|$mscale|$mscalefreq|$mscaleunits");
+		  push (@{$datacenter{$dckey}{metadata}},
+			"$mnet|$msta|$mloc|$mchan|$mstart|$mend|$mlat|$mlon|$melev|$mdepth|$mazimuth|$mdip|$minstrument|$msamplerate|$mscale|$mscalefreq|$mscaleunits");
 		  $metadatalisted = 1;
 		  $totalepochs++;
 		}
 
 		# Add entry to request hash with value of matching metadata
-		$request{"$mnet|$msta|$mloc|$mchan|$sstart|$send"} = "$mstart|$mend";
+		$datacenter{$dckey}{request}->{"$mnet|$msta|$mloc|$mchan|$sstart|$send"} = "$mstart|$mend";
 
 		# Track widest metadata range for NSLC for SACPZ and RESP requests
-		if ( ! exists $metarequest{"$mnet|$msta|$mloc|$mchan"} ) {
-		  $metarequest{"$mnet|$msta|$mloc|$mchan"} = "$cstart|$cend";
+		if ( ! exists $datacenter{$dckey}{metarequest}->{"$mnet|$msta|$mloc|$mchan"} ) {
+		  $datacenter{$dckey}{metarequest}->{"$mnet|$msta|$mloc|$mchan"} = "$cstart|$cend";
 		}
 		else {
-		  my ($vstart,$vend) = split (/\|/, $metarequest{"$mnet|$msta|$mloc|$mchan"});
+		  my ($vstart,$vend) = split (/\|/, $datacenter{$dckey}{metarequest}->{"$mnet|$msta|$mloc|$mchan"});
 
 		  $vstart = $cstart if ( $cstart < $vstart );
 		  $vend = $cend if ( $cend > $vend );
 
-		  $metarequest{"$mnet|$msta|$mloc|$mchan"} = "$vstart|$vend";
+		  $datacenter{$dckey}{metarequest}->{"$mnet|$msta|$mloc|$mchan"} = "$vstart|$vend";
 		}
 	      }
 	    }
@@ -1476,8 +1506,8 @@ sub FetchMetaDataHelper {
 #
 # A call back for LWP downloading of metadata.
 #
-# Add received data to metadataresp string, tally up the received data
-# size and print and updated (overwriting) byte count string.
+# Add received data to metadataresponse string, tally up the received
+# data size and print and updated (overwriting) byte count string.
 ######################################################################
 sub MDCallBack {
   my ($data, $response, $protocol) = @_;
@@ -1486,10 +1516,10 @@ sub MDCallBack {
   if ( $response->content_encoding() =~ /gzip/ ) {
     my $datablock = "";
     $inflater->inflate($data, $datablock);
-    $metadataresp .= $datablock;
+    $metadataresponse .= $datablock;
   }
   else {
-    $metadataresp .= $data;
+    $metadataresponse .= $data;
   }
 
   if ( $verbose >= 1 && ! $nobsprint ) {
