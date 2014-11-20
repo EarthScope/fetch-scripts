@@ -205,7 +205,9 @@
 #
 # 2014.323
 #  - Add -O and -M options to write all federated output to the same files.
-#  By default, a data center prefix is added to the output from each DC.
+#  By default a data center prefix is added to the output from each DC.
+#  - Only include a quality specification in time series requests if
+#  supplied by the user.
 #
 #  Author: Chad Trabant, IRIS Data Management Center
 
@@ -274,7 +276,7 @@ my $net        = undef;
 my $sta        = undef;
 my $loc        = undef;
 my $chan       = undef;
-my $qual       = "B";
+my $qual       = undef;
 my $starttime  = undef;
 my $endtime    = undef;
 my @latrange   = ();      # (minlat:maxlat)
@@ -360,7 +362,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -S,--sta          Station code, list and wildcards (* and ?) accepted\n";
   print " -L,--loc          Location ID, list and wildcards (* and ?) accepted\n";
   print " -C,--chan         Channel codes, list and wildcards (* and ?) accepted\n";
-  print " -Q,--qual         Quality indicator, default is best\n";
+  print " -Q,--qual         Quality indicator, by default no quality is specified\n";
   print " -s starttime      Specify start time (YYYY-MM-DD,HH:MM:SS.ssssss)\n";
   print " -e endtime        Specify end time (YYYY-MM-DD,HH:MM:SS.ssssss)\n";
   print " --lat min:max     Specify a minimum and/or maximum latitude range\n";
@@ -557,10 +559,10 @@ else {
 }
 
 # Process each data center
-foreach my $dckey ( keys %datacenter ) {
+foreach my $dckey ( sort keys %datacenter ) {
 
-  if ( $dckey && $verbose ) {
-    print STDERR "Fetching data from '$dckey'\n";
+  if ( $dckey ) {
+    printf STDERR "Fetching data from $dckey (%s)\n", $datacenter{$dckey}{website};
   }
 
   # Fetch metadata unless requested not to
@@ -907,7 +909,7 @@ sub FederateRequest {
   print STDERR "Federator catalog URI: '$uri'\n" if ( $verbose >= 2 );
   print STDERR "Federator catalog (POST):\n$postdata" if ( $verbose > 1 );
 
-  print STDERR "Fetching catalog response :: " if ( $verbose >= 1 );
+  print STDERR "Fetching catalog result :: " if ( $verbose >= 1 );
 
   $datasize = 0;
   $metadataresponse = "";
@@ -920,11 +922,11 @@ sub FederateRequest {
   $inflater->inflateReset if ( $inflater );
 
   if ( $response->code == 204 ) {
-    print (STDERR "No federator catalog response available\n") if ( $verbose >= 1 );
+    print (STDERR "No federator catalog results available\n") if ( $verbose >= 1 );
     return;
   }
   elsif ( ! $response->is_success() ) {
-    print (STDERR "Error fetching federator catalog response: "
+    print (STDERR "Error fetching federator catalog result: "
 	   . $response->code . " :: " . status_message($response->code) . "\n");
     print STDERR "------\n" . $response->decoded_content . "\n------\n";
     print STDERR "  URI: '$uri'\n" if ( $verbose >= 2 );
@@ -935,9 +937,15 @@ sub FederateRequest {
     printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose >= 1 );
   }
 
+  printf STDERR "Federator response code: %d\n", $response->code if ( $verbose >= 1 );
+  if ( $verbose >= 2 ) {
+    print STDERR "Federator response:\n";
+    print STDERR "-----------\n$metadataresponse\n-----------\n";
+  }
+
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $datasize/(($duration)?$duration:0.000001);
-  printf (STDERR "Received %s of federator catalog response in %.1f seconds (%s/s)\n",
+  printf (STDERR "Received %s of federator catalog result in %.1f seconds (%s/s)\n",
 	  sizestring($datasize), $duration, sizestring($rate)) if ( $verbose >= 0 );
 
   # Parse response from catalog service
@@ -945,14 +953,16 @@ sub FederateRequest {
   my $dckey = undef;
   foreach my $line ( split (/[\n\r]+/, $metadataresponse) ) {
     chomp $line;
+
     next if ( $line =~ /^#.*/ );  # Skip comment lines beginning with '#'
 
     # Reset data center parsing on empty line
     if ( ! $line ) {
       $dckey = undef;
+      next;
     }
 
-    my ($key,$website) = $line =~ /^DATACENTER\=([^,])\,(.*)$/;
+    my ($key,$website) = $line =~ /^DATACENTER\=([^,]+)\,(.*)$/;
     my ($stationws) = $line =~ /^STATIONSERVICE\=(.+)$/;
     my ($dataselectws) = $line =~ /^DATASELECTSERVICE\=(.+)$/;
 
@@ -963,6 +973,7 @@ sub FederateRequest {
     }
     elsif ( $stationws ) {
       if ( $dckey ) {
+	$stationws =~ s/\/$//; # Trim trailing slash
 	$datacenter{$dckey}{metadataws} = $stationws;
       }
       else {
@@ -972,6 +983,7 @@ sub FederateRequest {
     }
     elsif ( $dataselectws ) {
       if ( $dckey ) {
+	$dataselectws =~ s/\/$//; # Trim trailing slash
 	$datacenter{$dckey}{timeseriesws} = $dataselectws;
       }
       else {
@@ -1079,7 +1091,8 @@ sub FetchTimeSeriesData {
     my $uri = $datacenter{$dckey}{timeseriesws} . "/$query";
 
     # Create POST data selection: specify options followed by selections
-    my $postdata = "quality=$qual\n";
+    my $postdata = "";
+    $postdata .= "quality=$qual\n" if ( defined $qual );
     $postdata .= "minimumlength=$mslopt\n" if ( defined $mslopt );
     $postdata .= "longestonly=true\n" if ( defined $lsoopt );
 
