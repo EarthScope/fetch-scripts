@@ -215,8 +215,6 @@
 #
 #  Author: Chad Trabant, IRIS Data Management Center
 
-# Add checks for service interfaces, fail gracefully when not set
-
 use strict;
 use File::Basename;
 use Getopt::Long;
