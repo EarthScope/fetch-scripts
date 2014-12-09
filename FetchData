@@ -213,6 +213,11 @@
 #  - Add error message and more graceful failure when service interfaces
 #  have not been identified for requested data.
 #
+# 2014.342
+#  - Add parsing of other data center interfaces identified with *SERVICE=<URL>,
+#  store the values for SACPZSERVICE and RESPSERVICE in addition to the already
+#  parsed STATIONSERVICE and DATASELECTSERVICE.
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -224,7 +229,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.325";
+my $version = "2014.342";
 
 my $scriptname = basename($0);
 
@@ -546,7 +551,19 @@ $nometadata = undef if ( $metafile || $sacpzdir || $respdir
 
 # Resolve federated requests
 if ( $federate ) {
+
   &FederateRequest( $fedcatservice, \@selections );
+
+  if ( $verbose ) {
+    printf STDERR "Federation catalog results from %d data centers:\n", scalar keys %datacenter;
+    foreach my $dckey ( sort keys %datacenter ) {
+      printf STDERR "Data center: $dckey, %d selections\n", scalar  @{$datacenter{$dckey}{selection}};
+      print STDERR "  MetadataWS: $datacenter{$dckey}{metadataws}\n" if ( $datacenter{$dckey}{metadataws} );
+      print STDERR "  TimeSeriesWS: $datacenter{$dckey}{timeseriesws}\n" if ( $datacenter{$dckey}{timeseriesws} );
+      print STDERR "  SACPZWS: $datacenter{$dckey}{sacpzws}\n" if ( $datacenter{$dckey}{sacpzws} );
+      print STDERR "  RESPWS: $datacenter{$dckey}{respws}\n" if ( $datacenter{$dckey}{respws} );
+    }
+  }
 }
 # Otherwise set up default (empty) data center
 else {
@@ -617,7 +634,7 @@ foreach my $dckey ( sort keys %datacenter ) {
   # Collect SAC P&Zs if output directory specified
   if ( $sacpzdir ) {
     if ( ! exists $datacenter{$dckey}{sacpzws} ) {
-      print STDERR "Cannot fetch SAC PZx, no SACPZ service available for data center $dckey\n";
+      print STDERR "Cannot fetch SAC PZs, no SACPZ service available for data center $dckey\n";
     }
     else {
       my $dcsacpzdir = ( $dckey ) ? "$dckey/$sacpzdir" : $sacpzdir;
@@ -875,6 +892,8 @@ sub ReadBFastFile {
 # %datacenter{DATACENTER}{website}
 # %datacenter{DATACENTER}{stationws}
 # %datacenter{DATACENTER}{dataselectws}
+# %datacenter{DATACENTER}{sacpzws}
+# %datacenter{DATACENTER}{respws}
 # %datacenter{DATACENTER}{selection}
 #
 # Return count of unique data centers identified in response on
@@ -987,6 +1006,9 @@ sub FederateRequest {
     my ($key,$website) = $line =~ /^DATACENTER\=([^,]+)\,(.*)$/;
     my ($stationws) = $line =~ /^STATIONSERVICE\=(.+)$/;
     my ($dataselectws) = $line =~ /^DATASELECTSERVICE\=(.+)$/;
+    my ($sacpzws) = $line =~ /^SACPZSERVICE\=(.+)$/;
+    my ($respws) = $line =~ /^RESPSERVICE\=(.+)$/;
+    my ($genericws) = $line =~ /^.*SERVICE\=(.+)$/;
 
     if ( $key ) {
       $dckey = $key;
@@ -1013,13 +1035,34 @@ sub FederateRequest {
 	return undef;
       }
     }
+    elsif ( $sacpzws ) {
+      if ( $dckey ) {
+	$sacpzws =~ s/\/$//; # Trim trailing slash
+	$datacenter{$dckey}{sacpzws} = $sacpzws;
+      }
+      else {
+	print STDERR "Federation catalog service returned SACPZSERVICE without DATACENTER declared\n";
+	return undef;
+      }
+    }
+    elsif ( $respws ) {
+      if ( $dckey ) {
+	$respws =~ s/\/$//; # Trim trailing slash
+	$datacenter{$dckey}{respws} = $respws;
+      }
+      else {
+	print STDERR "Federation catalog service returned RESPSERVICE without DATACENTER declared\n";
+	return undef;
+      }
+    }
+    elsif ( $genericws ) {
+      # Ignore any other service declarations.
+    }
     else {
       my ($net,$sta,$loc,$chan,$start,$end) = split (/\s+/, $line);
 
-      #CHAD, will need to add ignore for passed back key=value pairs
-
       if ( ! defined $end ) {
-	print STDERR "Federation catalog service return unrecognized selection line:\n'$line'\n";
+	print STDERR "Federation catalog service returned unrecognized selection line:\n'$line'\n";
 	return undef;
       }
 
