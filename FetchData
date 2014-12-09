@@ -218,6 +218,8 @@
 #  the already parsed STATIONSERVICE and DATASELECTSERVICE.
 #  - Gracefully skip unrecognized SERVICE declarations and key=value parameters.
 #  - Fix creation of SACPZ and RESP directories.
+#  - Include output file names in diagnostic output.
+#  - Add data center identifier, when present, to header of metadata files.
 #
 #  Author: Chad Trabant, IRIS Data Management Center
 
@@ -556,8 +558,8 @@ if ( $federate ) {
 
   &FederateRequest( $fedcatservice, \@selections );
 
-  if ( $verbose ) {
-    printf STDERR "Federation catalog results from %d data centers:\n", scalar keys %datacenter;
+  if ( $verbose >= 1 ) {
+    printf STDERR "Federation catalog results from %d data center(s):\n", scalar keys %datacenter;
     foreach my $dckey ( sort keys %datacenter ) {
       printf STDERR "Data center: $dckey, %d selections\n", scalar  @{$datacenter{$dckey}{selection}};
       print STDERR "  MetadataWS: $datacenter{$dckey}{metadataws}\n" if ( $datacenter{$dckey}{metadataws} );
@@ -673,14 +675,17 @@ foreach my $dckey ( sort keys %datacenter ) {
       printf STDERR "No metdata available\n";
     }
     else {
-      printf STDERR "Writing metadata (%d channel epochs) file\n",
-	scalar @{$datacenter{$dckey}{metadata}} if ( $verbose >= 1 );
-
       # Open metadata file, appending if requested, adding data center prefix if needed
       my $mode = ( defined $metafileapp ) ? ">>" : ">";
       my $metafilename = $metafile;
       $metafilename = "$dckey-$metafile" if ( ! defined $metafileapp && $dckey );
       open (META, $mode, $metafilename) || die "Cannot open metadata file '$metafilename': $!\n";
+
+      printf STDERR "Writing metadata (%d channel epochs) to file: %s\n",
+	scalar @{$datacenter{$dckey}{metadata}}, $metafilename if ( $verbose >= 0 );
+
+      # Print data center identifier
+      printf META "#$dckey: %s\n", $datacenter{$dckey}{website} if ( $dckey );
 
       # Print header line
       print META "#net|sta|loc|chan|lat|lon|elev|depth|azimuth|dip|instrument|scale|scalefreq|scaleunits|samplerate|start|end\n";
@@ -954,7 +959,7 @@ sub FederateRequest {
   print STDERR "Federator catalog URI: '$uri'\n" if ( $verbose >= 2 );
   print STDERR "Federator catalog (POST):\n$postdata" if ( $verbose > 1 );
 
-  print STDERR "Fetching federator catalog result :: " if ( $verbose >= 1 );
+  print STDERR "Fetching federator catalog results :: " if ( $verbose >= 1 );
 
   $datasize = 0;
   $metadataresponse = "";
@@ -990,7 +995,7 @@ sub FederateRequest {
 
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $datasize/(($duration)?$duration:0.000001);
-  printf (STDERR "Received %s of federator catalog result in %.1f seconds (%s/s)\n",
+  printf (STDERR "Received %s from federator catalog in %.1f seconds (%s/s)\n",
 	  sizestring($datasize), $duration, sizestring($rate)) if ( $verbose >= 0 );
 
   # Parse response from catalog service
@@ -1247,8 +1252,8 @@ sub FetchTimeSeriesData {
 
   my $duration = Time::HiRes::time - $ftime;
   my $rate = $totalbytes/(($duration)?$duration:0.000001);
-  printf (STDERR "Received %s of time series data in %.1f seconds (%s/s)\n",
-	  sizestring($totalbytes), $duration, sizestring($rate)) if ( $verbose >= 0 );
+  printf (STDERR "Received %s of time series data in %.1f seconds (%s/s) - written to %s\n",
+	  sizestring($totalbytes), $duration, sizestring($rate), $outfilename) if ( $verbose >= 0 );
 
   # Remove empty file
   unlink $outfile if ( -z $outfile );
