@@ -214,9 +214,9 @@
 #  have not been identified for requested data.
 #
 # 2014.342
-#  - Add parsing of other data center interfaces identified with *SERVICE=<URL>,
-#  store the values for SACPZSERVICE and RESPSERVICE in addition to the already
-#  parsed STATIONSERVICE and DATASELECTSERVICE.
+#  - Add parsing of values for SACPZSERVICE and RESPSERVICE in addition to
+#  the already parsed STATIONSERVICE and DATASELECTSERVICE.
+#  - Gracefully skip unrecognized SERVICE declarations and key=value parameters.
 #
 #  Author: Chad Trabant, IRIS Data Management Center
 
@@ -1008,7 +1008,6 @@ sub FederateRequest {
     my ($dataselectws) = $line =~ /^DATASELECTSERVICE\=(.+)$/;
     my ($sacpzws) = $line =~ /^SACPZSERVICE\=(.+)$/;
     my ($respws) = $line =~ /^RESPSERVICE\=(.+)$/;
-    my ($genericws) = $line =~ /^.*SERVICE\=(.+)$/;
 
     if ( $key ) {
       $dckey = $key;
@@ -1055,9 +1054,17 @@ sub FederateRequest {
 	return undef;
       }
     }
-    elsif ( $genericws ) {
-      # Ignore any other service declarations.
-    }
+    # Ignore any other service declarations.
+    elsif ( $line =~ /^.*SERVICE\=.+$/ )
+      {
+	print STDERR "Unused service declaration: $line\n" if ( verbose >= 2 );
+      }
+    # Ignore key=value parameters.
+    elsif ( $line =~ /^\w+\=\w+$/ )
+      {
+	print STDERR "Unused key=value: $line\n" if ( verbose >= 2 );
+      }
+    # All other lines should be selection lines
     else {
       my ($net,$sta,$loc,$chan,$start,$end) = split (/\s+/, $line);
 
@@ -1067,9 +1074,14 @@ sub FederateRequest {
       }
 
       # Add to data center selection list
-      push ( @{$datacenter{$dckey}{selection}}, "$net|$sta|$loc|$chan|$start|$end");
+      if ( $dckey ) {
+	push ( @{$datacenter{$dckey}{selection}}, "$net|$sta|$loc|$chan|$start|$end");
+      }
+      else {
+	print STDERR "Federation catalog service returned selecion line without DATACENTER declared\n";
+	return undef;
+      }
     }
-
   } # Done parsing federator catalog response
 
   return $datacentercount;
