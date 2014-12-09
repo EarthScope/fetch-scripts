@@ -217,6 +217,7 @@
 #  - Add parsing of values for SACPZSERVICE and RESPSERVICE in addition to
 #  the already parsed STATIONSERVICE and DATASELECTSERVICE.
 #  - Gracefully skip unrecognized SERVICE declarations and key=value parameters.
+#  - Fix creation of SACPZ and RESP directories.
 #
 #  Author: Chad Trabant, IRIS Data Management Center
 
