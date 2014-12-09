@@ -386,6 +386,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -a user:pass      User and password for access to restricted data\n";
   print "\n";
   print " -F                Federate the request to multiple data centers if needed\n";
+  print "                     Output files are prefixed by data center identifiers\n";
   print "\n";
   print " -o outfile        Fetch time series data and write to output file\n";
   print " -O outfile        Write all timeseries to a single file, useful with -F\n";
@@ -638,9 +639,10 @@ foreach my $dckey ( sort keys %datacenter ) {
     }
     else {
       my $dcsacpzdir = ( $dckey ) ? "$dckey/$sacpzdir" : $sacpzdir;
+      $dcsacpzdir = dirname ($dcsacpzdir);
 
       if ( ! -d "$dcsacpzdir" ) {
-	mkdir $dcsacpzdir, 0755 || die "Cannot create directory $dcsacpzdir: $!\n";
+	mkdir ($dcsacpzdir, 0755) || die "Cannot create directory $dcsacpzdir: $!\n";
       }
 
       &FetchSACPZ( $dckey, $dcsacpzdir );
@@ -654,9 +656,10 @@ foreach my $dckey ( sort keys %datacenter ) {
     }
     else {
       my $dcrespdir = ( $dckey ) ? "$dckey/$respdir" : $respdir;
+      $dcrespdir = dirname ($dcrespdir);
 
       if ( ! -d "$dcrespdir" ) {
-	mkdir $dcrespdir, 0755 || die "Cannot create directory $dcrespdir: $!\n";
+	mkdir ($dcrespdir, 0755) || die "Cannot create directory $dcrespdir: $!\n";
       }
 
       &FetchRESP( $dckey, $dcrespdir );
@@ -1054,15 +1057,15 @@ sub FederateRequest {
 	return undef;
       }
     }
-    # Ignore any other service declarations.
+    # Ignore any other service declarations
     elsif ( $line =~ /^.*SERVICE\=.+$/ )
       {
-	print STDERR "Unused service declaration: $line\n" if ( verbose >= 2 );
+	print STDERR "Unused service declaration: $line\n" if ( $verbose >= 2 );
       }
-    # Ignore key=value parameters.
-    elsif ( $line =~ /^\w+\=\w+$/ )
+    # Ignore key=value parameters
+    elsif ( $line =~ /^[\-\.\w]+\=[\-\.\w]+$/ )
       {
-	print STDERR "Unused key=value: $line\n" if ( verbose >= 2 );
+	print STDERR "Unused key=value: $line\n" if ( $verbose >= 2 );
       }
     # All other lines should be selection lines
     else {
