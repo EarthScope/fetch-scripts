@@ -37,7 +37,7 @@
 #
 # 1) Command line arguments: -N, -S, -L, -C, -Q, -s, -e
 #
-# 2) A BREQ_FAST formatted file, http://www.iris.edu/manuals/breq_fast.htm
+# 2) A BREQ_FAST formatted file, http://ds.iris.edu/manuals/breq_fast.htm
 #
 # 3) A selection file containing a list of:
 #    Net Sta Loc Chan Start End
