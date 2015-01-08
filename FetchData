@@ -214,12 +214,17 @@
 #  have not been identified for requested data.
 #
 # 2014.342
-#  - Add parsing of values for SACPZSERVICE and RESPSERVICE in addition to
-#  the already parsed STATIONSERVICE and DATASELECTSERVICE.
-#  - Gracefully skip unrecognized SERVICE declarations and key=value parameters.
+#  - Federator: Add parsing of values for SACPZSERVICE and RESPSERVICE in
+#  addition to the already parsed STATIONSERVICE and DATASELECTSERVICE.
+#  - Federator: Gracefully skip unrecognized SERVICE declarations and
+#  key=value parameters.
 #  - Fix creation of SACPZ and RESP directories.
 #  - Include output file names in diagnostic output.
 #  - Add data center identifier, when present, to header of metadata files.
+#
+# 2015.007
+#  - Change validation of channel codes in breq_fast parsing to accept
+#  values less than 3 characters, thsi will allow single '*' wildcards.
 #
 #  Author: Chad Trabant, IRIS Data Management Center
 
@@ -232,7 +237,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2014.342";
+my $version = "2015.007";
 
 my $scriptname = basename($0);
 
@@ -861,7 +866,7 @@ sub ReadBFastFile {
     }
 
     foreach my $chan ( @chans ) {
-      if ( $chan !~ /^[A-Za-z0-9*?]{3,3}$/ ) {
+      if ( $chan !~ /^[A-Za-z0-9*?]{1,3}$/ ) {
 	print "Unrecognized channel codes: '$chan', skipping line $linecount\n" if ( $verbose >= 1 );
 	next BFLINE;
       }
