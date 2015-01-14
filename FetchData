@@ -222,6 +222,9 @@
 #  - Include output file names in diagnostic output.
 #  - Add data center identifier, when present, to header of metadata files.
 #
+# 2014.351:
+#  - Avoid undefined reference by checking for metadata before trying to access it.
+#
 # 2015.014
 #  - Change validation of channel codes in breq_fast parsing to accept
 #  values less than 3 characters, thsi will allow single '*' wildcards.
@@ -677,7 +680,7 @@ foreach my $dckey ( sort keys %datacenter ) {
   }
 
   # Write metadata to file
-  if ( $metafile ) {
+  if ( $metafile && exists $datacenter{$dckey}{metadata} ) {
     if ( scalar @{$datacenter{$dckey}{metadata}} <= 0 ) {
       printf STDERR "No metdata available\n";
     }
