@@ -228,7 +228,7 @@
 # 2015.014
 #  - Change validation of channel codes in breq_fast parsing to accept
 #  values less than 3 characters, thsi will allow single '*' wildcards.
-#  TODO - Add support for matching metadata using exclusions as supported by
+#  - Add support for matching metadata using exclusions as supported by
 #  the DMC's fdsnws-station service.
 #
 #  Author: Chad Trabant, IRIS Data Management Center
@@ -241,6 +241,7 @@ use LWP::UserAgent;
 use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
+ use Tie::RefHash;
 
 my $version = "2015.014";
 
@@ -1617,7 +1618,8 @@ sub FetchMetaDataHelper {
   }
 
   # A nested hash used to match data requests with metadata
-  my %selectmatch = ();
+  # Tied to Tie::RefHash::Nestable so that references can be keys
+  tie my %selectmatch, 'Tie::RefHash::Nestable';
 
   # A nested hash of time extents for each NSLC request
   my %selectextent = ();
@@ -1667,23 +1669,37 @@ sub FetchMetaDataHelper {
     $sloc =~ s/\*/\.\*/g;   $sloc =~ s/\?/\./g;  $sloc =~ s/\,/\|/g;
     $schan =~ s/\*/\.\*/g; $schan =~ s/\?/\./g; $schan =~ s/\,/\|/g;
 
-    # Separate selections and exclusions
+    # Separate selections and exclusions.  The below voodoo:
+    # split on | separator, select entries starting with/without - exclusion,
+    # and rebuild expression.  Finally, remove the - characters.
     my $snetselect = join ('|', grep (!/^-/, split (/\|/,$snet)));
     my $snetexclude = join ('|', grep (/^-/, split (/\|/,$snet)));
-    if ( $snetselect && $snetexclude ) { $snet = "($snetselect) ||
-    $snet = join (' && ', $snetselect, $snetexclude);
-CHAD
+    $snetexclude =~ s/\-//g;
 
-    print STDERR "NETselect: '$snetselect'\nNETexclude: '$snetexclude'\n";
-    print STDERR "NETcompound: '$snet'\n";
+    my $sstaselect = join ('|', grep (!/^-/, split (/\|/,$ssta)));
+    my $sstaexclude = join ('|', grep (/^-/, split (/\|/,$ssta)));
+    $sstaexclude =~ s/\-//g;
 
-    # Compile regular expressions for faster comparison
-    $snet = qr/$snet/;
-    $ssta = qr/$ssta/;
-    $sloc = qr/$sloc/;
-    $schan = qr/$schan/;
+    my $slocselect = join ('|', grep (!/^-/, split (/\|/,$sloc)));
+    my $slocexclude = join ('|', grep (/^-/, split (/\|/,$sloc)));
+    $slocexclude =~ s/\-//g;
 
-    # Add entry to selection matching hash, this will eliminate exact duplicates
+    my $schanselect = join ('|', grep (!/^-/, split (/\|/,$schan)));
+    my $schanexclude = join ('|', grep (/^-/, split (/\|/,$schan)));
+    $schanexclude =~ s/\-//g;
+
+    # Compile regular expressions for faster comparison, store selections
+    # and exclusions in a hash for each level.
+    $snet = { 'select' => ($snetselect) ? qr/$snetselect/ : undef,
+              'exclude' => ($snetexclude) ? qr/$snetexclude/ : undef };
+    $ssta = { 'select' => ($sstaselect) ? qr/$sstaselect/ : undef,
+              'exclude' => ($sstaexclude) ? qr/$sstaexclude/ : undef };
+    $sloc = { 'select' => ($slocselect) ? qr/$slocselect/ : undef,
+              'exclude' => ($slocexclude) ? qr/$slocexclude/ : undef };
+    $schan = { 'select' => ($schanselect) ? qr/$schanselect/ : undef,
+               'exclude' => ($schanexclude) ? qr/$schanexclude/ : undef };
+
+    # Add entry to selection matching hash, using hashes of regexes as keys
     $selectmatch{$snet}{$ssta}{$sloc}{$schan}{"$kstart|$kend"} = "$sstart|$send";
   }
 
@@ -1692,7 +1708,7 @@ CHAD
     foreach my $sta ( sort keys %{$selectextent{$net}} ) {
       foreach my $loc ( sort keys %{$selectextent{$net}{$sta}} ) {
 	foreach my $chan ( sort keys %{$selectextent{$net}{$sta}{$loc}} ) {
-	  my ($start,$end) = @{$selectextent{$net}{$sta}{$loc}{$chan}};
+          my ($start,$end) = @{$selectextent{$net}{$sta}{$loc}{$chan}};
 
 	  $postdata .= "$net $sta $loc $chan $start $end\n";
 	}
@@ -1785,16 +1801,20 @@ CHAD
 
     # Match metadata to selections (requests) using nested hash of (compiled) regexes
     foreach my $knet ( keys %selectmatch ) {
-      next if $mnet !~ /^$knet$/;
+      next if ( defined $knet->{select} && $mnet !~ /^$knet->{select}$/ );
+      next if ( defined $knet->{exclude} && $mnet =~ /^$knet->{exclude}$/ );
 
       foreach my $ksta ( keys %{$selectmatch{$knet}} ) {
-	next if $msta !~ /^$ksta$/;
+	next if ( defined $ksta->{select} && $msta !~ /^$ksta->{select}$/ );
+	next if ( defined $ksta->{exclude} && $msta =~ /^$ksta->{exclude}$/ );
 
 	foreach my $kloc ( keys %{$selectmatch{$knet}{$ksta}} ) {
-	  next if $mloc !~ /^$kloc$/;
+	  next if ( defined $kloc->{select} && $mloc !~ /^$kloc->{select}$/ );
+          next if ( defined $kloc->{exclude} && $mloc =~ /^$kloc->{exclude}$/ );
 
-	  foreach my $kchan ( keys %{$selectmatch{$knet}{$ksta}{$kloc}} ) {
-	    next if $mchan !~ /^$kchan$/;
+          foreach my $kchan ( keys %{$selectmatch{$knet}{$ksta}{$kloc}} ) {
+	    next if ( defined $kchan->{select} && $mchan !~ /^$kchan->{select}$/ );
+	    next if ( defined $kchan->{exclude} && $mchan =~ /^$kchan->{exclude}$/ );
 
 	    # Check for time overlap (intersection) with metadata
 	    foreach my $timekey ( keys %{$selectmatch{$knet}{$ksta}{$kloc}{$kchan}} ) {
