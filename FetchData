@@ -1667,6 +1667,16 @@ sub FetchMetaDataHelper {
     $sloc =~ s/\*/\.\*/g;   $sloc =~ s/\?/\./g;  $sloc =~ s/\,/\|/g;
     $schan =~ s/\*/\.\*/g; $schan =~ s/\?/\./g; $schan =~ s/\,/\|/g;
 
+    # Separate selections and exclusions
+    my $snetselect = join ('|', grep (!/^-/, split (/\|/,$snet)));
+    my $snetexclude = join ('|', grep (/^-/, split (/\|/,$snet)));
+    if ( $snetselect && $snetexclude ) { $snet = "($snetselect) ||
+    $snet = join (' && ', $snetselect, $snetexclude);
+CHAD
+
+    print STDERR "NETselect: '$snetselect'\nNETexclude: '$snetexclude'\n";
+    print STDERR "NETcompound: '$snet'\n";
+
     # Compile regular expressions for faster comparison
     $snet = qr/$snet/;
     $ssta = qr/$ssta/;
