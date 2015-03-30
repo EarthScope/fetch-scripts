@@ -227,7 +227,7 @@
 #
 # 2015.014
 #  - Change validation of channel codes in breq_fast parsing to accept
-#  values less than 3 characters, thsi will allow single '*' wildcards.
+#  values less than 3 characters, this will allow single '*' wildcards.
 #  - Add support for matching metadata using exclusions as supported by
 #  the DMC's fdsnws-station service.
 #
