@@ -231,6 +231,11 @@
 #  - Add support for matching metadata using exclusions as supported by
 #  the DMC's fdsnws-station service.
 #
+# 2015.135
+#  - Fix SAC PZ and RESP output directory designation and creation when
+#  Federation is being performed.  Data center specific directories are
+#  now created in the directory specified for the output.
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -243,7 +248,7 @@ use HTTP::Date;
 use Time::HiRes;
  use Tie::RefHash;
 
-my $version = "2015.014";
+my $version = "2015.135";
 
 my $scriptname = basename($0);
 
@@ -652,8 +657,7 @@ foreach my $dckey ( sort keys %datacenter ) {
       print STDERR "Cannot fetch SAC PZs, no SACPZ service available for data center $dckey\n";
     }
     else {
-      my $dcsacpzdir = ( $dckey ) ? "$dckey/$sacpzdir" : $sacpzdir;
-      $dcsacpzdir = dirname ($dcsacpzdir);
+      my $dcsacpzdir = ( $dckey ) ? "$sacpzdir/$dckey" : $sacpzdir;
 
       if ( ! -d "$dcsacpzdir" ) {
 	mkdir ($dcsacpzdir, 0755) || die "Cannot create directory $dcsacpzdir: $!\n";
@@ -669,8 +673,7 @@ foreach my $dckey ( sort keys %datacenter ) {
       print STDERR "Cannot fetch RESP, no RESP service available for data center $dckey\n";
     }
     else {
-      my $dcrespdir = ( $dckey ) ? "$dckey/$respdir" : $respdir;
-      $dcrespdir = dirname ($dcrespdir);
+      my $dcrespdir = ( $dckey ) ? "$respdir/$dckey" : $respdir;
 
       if ( ! -d "$dcrespdir" ) {
 	mkdir ($dcrespdir, 0755) || die "Cannot create directory $dcrespdir: $!\n";
