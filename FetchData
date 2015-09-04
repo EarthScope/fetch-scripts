@@ -237,7 +237,9 @@
 #  now created in the directory specified for the output.
 #
 # 2015.246
-#  - Retore capabilty to write output miniSEED to stdout by specifying "-".
+#  - Restore capabilty to write output miniSEED to stdout by specifying
+#  the output file as a single dash.
+#  - Support non-persisent, session cookies for HTTP requests.
 #
 #  Author: Chad Trabant, IRIS Data Management Center
 
@@ -251,7 +253,7 @@ use HTTP::Date;
 use Time::HiRes;
  use Tie::RefHash;
 
-my $version = "2015.135";
+my $version = "2015.246";
 
 my $scriptname = basename($0);
 
@@ -1972,6 +1974,9 @@ BEGIN {
 
       # Follow redirects on POST method in addition to GET and HEAD
       push @{ $self->requests_redirectable }, 'POST';
+
+      # Support non-persisent, session cookies
+      $self->cookie_jar ( {} );
 
       $self;
     }
