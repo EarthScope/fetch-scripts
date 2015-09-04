@@ -236,6 +236,9 @@
 #  Federation is being performed.  Data center specific directories are
 #  now created in the directory specified for the output.
 #
+# 2015.246
+#  - Retore capabilty to write output miniSEED to stdout by specifying "-".
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -1128,7 +1131,12 @@ sub FetchTimeSeriesData {
   my $outfilemode = shift;
 
   # Open output file with specified name and mode
-  open (OUT, $outfilemode, $outfilename) || die "Cannot open output file '$outfilename': $!\n";
+  if ( $outfilename ne "-" ) {
+    open (OUT, $outfilemode, $outfilename) || die "Cannot open output file '$outfilename': $!\n";
+  }
+  else {
+    open (OUT, ">&STDOUT") || die "Cannot open output file '$outfilename': $!\n";
+  }
 
   my $count = 0;
 
