@@ -240,6 +240,7 @@
 #  - Restore capabilty to write output miniSEED to stdout by specifying
 #  the output file as a single dash.
 #  - Support non-persisent, session cookies for HTTP requests.
+#  - On authentication errors, retry the request a single time.
 #
 #  Author: Chad Trabant, IRIS Data Management Center
 
@@ -1228,6 +1229,12 @@ sub FetchTimeSeriesData {
       print (STDERR "No data available\n") if ( $verbose >= 1 );
     }
     elsif ( $response->code == 401 ) {
+      # If this is the first authentication failure try one more time
+      if ( $fetchcnt == 1 ) {
+        $fetchcnt++;
+        goto REDOGROUP;
+      }
+
       print (STDERR "AUTHORIZATION FAILED, username and password not recognized\n");
       last;
     }
