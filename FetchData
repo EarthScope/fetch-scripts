@@ -237,7 +237,7 @@
 #  now created in the directory specified for the output.
 #
 # 2015.246
-#  - Restore capabilty to write output miniSEED to stdout by specifying
+#  - Restore capability to write output miniSEED to stdout by specifying
 #  the output file as a single dash.
 #  - Support non-persisent, session cookies for HTTP requests.
 #  - On authentication errors, retry the request a single time.
