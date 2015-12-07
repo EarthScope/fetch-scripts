@@ -105,51 +105,51 @@
 #  comma separated and leave dip in SEED convention.
 #  - Do not translate commas to semicolons in instrument name in metadata.
 #
-# 2013.086
+# 2013.086:
 #  - Remove code to filter Authorization headers, Apache Tomcat has been fixed
 #  to accept Digest Authentication credentials as submitted by libwww/LWP.
 #
-# 2013.118
+# 2013.118:
 #  - Fix parsing of start and end times from metadata that are used when no
 #  start and/or end is specified by the caller.
 #
-# 2013.150
+# 2013.150:
 #  - Allow dash characters in breqfast formatted requests for the network
 #  fields to support virtual networks that use dashes.
 #
-# 2013.186
+# 2013.186:
 #  - Change service URL override command line options to match
 #  environment variables.
 #
-# 2013.197
+# 2013.197:
 #  - Fix parsing of element values of "0".
 #
-# 2013.198
+# 2013.198:
 #  - Add test for minimum version of LWP (libwww) module of 5.806.
 #
-# 2013.212
+# 2013.212:
 #  - Fetch metadata for request by default, this allows grouping of time series
 #  requests and ultimately more efficient recovery in the case of connection
 #  breaks.  Also added an option of --nometadata or -nm to suppress the
 #  fetching of metadata when it is not strictly needed.
 #  - Remove lingering overrides to deprecated service locations.
 #
-# 2014.056
+# 2014.056:
 #  - Allow gzip'ed HTTP encoding for metadata, SACPZ and RESP requests if
 #  support exists on the local system.
 #  - Add the -noretry option, when used the script will exit on time series
 #  request timeouts/errors with no retries.
 #
-# 2014.084
+# 2014.084:
 #  - Add -q option to make the script quiet except for errors.
 #  - Exit value will be 1 if any service requests failed.
 #
-# 2014.107
+# 2014.107:
 #  - Instantiate new UserAgent client for each group when fetching time series
 #  instead of reusing the same client object.  This is to make sure no
 #  authentication details are shared between requests.
 #
-# 2014.129
+# 2014.129:
 #  - Convert metadata fetching to use POST capability of fdsnws-station.
 #  This allows making a single metadata request when the request is a list of
 #  many selections (selection list file or BREQ_FAST), instead of generating a
@@ -159,21 +159,21 @@
 #  metadata epochs for each channel.  This fixes a bug where only the last epoch
 #  is represented in a metadata file when the request crosses many epochs.
 #
-# 2014.134
+# 2014.134:
 #  - Optimize the metadata and request window matching by using compiled regexes.
 #
-# 2014.135
+# 2014.135:
 #  - Fix matching requests and metadata for open time windows.
 #  - Optimize request and metadata matching with a nested hash of compiled regexes.
 #  - Avoid selecting too much secondary metadata (SACPZ and RESP) by shrinking
 #  the request window by one second on each end.
 #
-# 2014.136
+# 2014.136:
 #  - Fetch metadata for virtual networks separately from all other metadata in
 #  order to properly match data requests with metadata.
 #  - Properly match lists in network, station, location and channel fields.
 #
-# 2014.142
+# 2014.142:
 #  - Fetch metadata using extents for each unique NSLC group, this can be a much
 #  smaller (and faster query) for requests with a large number of repeated NSLCs.
 #
@@ -203,17 +203,17 @@
 #  - Restructure internal flow for multiple data center handling.
 #  - Add FederateRequest() to handle federation catalog servicing.
 #
-# 2014.323
+# 2014.323:
 #  - Add -O and -M options to write all federated output to the same files.
 #  By default a data center prefix is added to the output from each DC.
 #  - Only include a quality specification in time series requests if
 #  supplied by the user.
 #
-# 2014.325
+# 2014.325:
 #  - Add error message and more graceful failure when service interfaces
 #  have not been identified for requested data.
 #
-# 2014.342
+# 2014.342:
 #  - Federator: Add parsing of values for SACPZSERVICE and RESPSERVICE in
 #  addition to the already parsed STATIONSERVICE and DATASELECTSERVICE.
 #  - Federator: Gracefully skip unrecognized SERVICE declarations and
@@ -225,22 +225,27 @@
 # 2014.351:
 #  - Avoid undefined reference by checking for metadata before trying to access it.
 #
-# 2015.014
+# 2015.014:
 #  - Change validation of channel codes in breq_fast parsing to accept
 #  values less than 3 characters, this will allow single '*' wildcards.
 #  - Add support for matching metadata using exclusions as supported by
 #  the DMC's fdsnws-station service.
 #
-# 2015.135
+# 2015.135:
 #  - Fix SAC PZ and RESP output directory designation and creation when
 #  Federation is being performed.  Data center specific directories are
 #  now created in the directory specified for the output.
 #
-# 2015.246
+# 2015.246:
 #  - Restore capability to write output miniSEED to stdout by specifying
 #  the output file as a single dash.
 #  - Support non-persisent, session cookies for HTTP requests.
 #  - On authentication errors, retry the request a single time.
+#
+# 2015.341:
+#  - Change retry count for failed time series requests from 60 to 10.
+#  This mitigates long delays somewhat when data centers do not fail
+#  for a very long time.
 #
 #  Author: Chad Trabant, IRIS Data Management Center
 
@@ -254,7 +259,7 @@ use HTTP::Date;
 use Time::HiRes;
 use Tie::RefHash;
 
-my $version = "2015.246";
+my $version = "2015.341";
 
 my $scriptname = basename($0);
 
@@ -1256,8 +1261,8 @@ sub FetchTimeSeriesData {
       # For real output files rewind position to the end of the last group data
       seek (OUT, $outoffset, 0) if ( $outfile ne "-" );
 
-      # Retry in 10 seconds or give up if already tried 60 times.
-      if ( $response->code != 400 && $fetchcnt < 60 ) {
+      # Retry in 10 seconds or give up if already tried 10 times.
+      if ( $response->code != 400 && $fetchcnt < 10 ) {
 	print STDERR "Retrying request in 10 seconds\n";
 	sleep 10;
 	$fetchcnt++;
