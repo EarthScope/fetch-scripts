@@ -1,4 +1,4 @@
-#!/home/product1/anaconda/bin/python
+#!/usr/bin/env python
 #
 # FetchSyn
 #
