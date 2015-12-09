@@ -1,0 +1,678 @@
+#!/home/product1/anaconda/bin/python
+#
+# FetchSyn
+#
+# For help type:  FetchSyn --u
+#
+# FetchSyn is a python command line client to download synthetic
+# seismograms from the IRIS Synthetics Engine (Syngine).
+# Find the most current version at http://service.iris.edu/clients/
+#
+# SYNGINE OVERVIEW:           http://ds.iris.edu/ds/products/syngine
+# SYNGINE MODELS:             http://ds.iris.edu/ds/products/syngine/#models
+# SYNGINE PARAMETERS:         http://service.iris.edu/irisws/syngine/1
+#
+# Python Dependencies:
+#    *must have the requests package
+#    *if using python3, the user must change from StringIO to io.StringIO 
+#
+# FetchSyn usage: A source and receiver is required, everything else has a default.
+#
+# RECEIVER: one of the following is required
+#  A) rlat     Receiver longitude
+#     rlon     Receiver latitude 
+#  B) sta,S    Station name.  use * to wildcard.
+#     net,N    Network name
+#                  Notes: *if only a net is given, then all sta will be included
+#                         *virtual networks are valid networks, e.g. _GSN
+#  C) recfile  Textfile with a list of receivers as (NET STA) or
+#                  (RLAT RLON [netcode stacode loccode])
+#     Valid examples in a recfile:
+#     IU ANMO 
+#     II *
+#     -89 -179
+#     -89 -178 S0002
+#     -89 -177 N2 S0003 L2
+#     -89 -176 netcode=N2 stacode=S0004 loccode=L3
+#
+# SOURCES:  one of the following is required
+#  A) evid     Event id [catalog]:[eventid] 
+#  B) slat     source latitude
+#     slon     source longitude
+#     sdepm    source depth in meters
+#   b1) mt     source moment tensor in NM: mrr,mtt,mpp,mrt,mrp,mtp
+#   b2) dc     source double couple:  strike,dip,rake [,scalar moment in NM]
+#   b3) force  source force in NM: Fr,Ft,Fp
+#
+# ORIGIN/START/END TIME (optional)
+#     o      Origin Time. Must be absolute (YYYY-MM-DD,HH:MM:SS) or (YYYY,MM,DD,HH,MM,SS)
+#     s      Start Time. Either 1) absolute time (YYYY-MM-DD,HH:MM:SS)
+#                               2) phase-relative offset e.g. P+10 or ScS-100
+#                               3) an offset from origin in seconds
+#     e      End Time. Either   1) absolute time (YYYY-MM-DD,HH:MM:SS)
+#                               2) phase-relative offset e.g. P+10 or ScS-100
+#                               3) an offset (duration) from start time in seconds
+#
+#
+# OUTPUT:
+#  Output files are either in miniSEED (mseed) or a zip archive of SAC
+#      files (saczip).  SAC files will have the headers populated.
+#
+# QUICK EXAMPLES
+#  FetchSyn.py --recfile rec.txt --slat 38.3 --slon 142.3 --sdepm 24400 --dc 203,10,88,5.3e22
+#  FetchSyn.py --N IU --S ANMO,KIP --evid GCMT:M201103110546A
+#  FetchSyn.py --N IU --S ANMO,KIP --evid GCMT:M201103110546A --sdepm 35000
+#  FetchSyn.py --N _GSN --evid GCMT:M201103110546A --model iasp91_2s --dt 0.05 --label TOHOKU
+#                --format mseed --C ZRT --units velocity --s P-10 --e 300
+#
+# ## Change history ##
+#
+#  2015.342:
+#  -Initial release
+#
+#  Author: Alex Hutko, IRIS Data Management Center
+
+from __future__ import print_function
+import requests
+import datetime
+import re
+import sys
+import time
+import argparse
+import csv
+import StringIO
+#import io.StringIO   #--- Python3 users will have to change to this
+
+########################
+# Used to check if an input number is an actual number and within bounds
+def check_number(s,min,max):
+    try:
+        float(s)
+        s=float(s)
+        if ( s >= min and s <= max ):
+            ierror = 0
+        else:
+            ierror = 1
+    except:
+        ierror = 2
+    return ierror
+########################
+
+CurrentTime0 = time.time()
+
+for i, arg in enumerate(sys.argv):
+    if (arg[0] == '-') and arg[1].isdigit(): sys.argv[i] = ' ' + arg
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument('--recfile','--ReceiverFile', action='store', dest='ReceiverFile',help='receiver file name with NET STATION')
+parser.add_argument('--u', action='store_true', dest='helpmenu',help='extended HELP MENU')
+parser.add_argument('--outfile', action='store', dest='outfile',help='output file label' )
+
+parser.add_argument('--model', action='store', dest='model',help='model from list: http://ds.iris.edu/ds/products/syngine' )
+parser.add_argument('--format', action='store', dest='formatstring',help='miniseed or saczip')
+parser.add_argument('--label', action='store', dest='label',help='label')
+parser.add_argument('--C','--components', action='store', dest='components',help='components: any combination of ZNERT')
+parser.add_argument('--units', action='store', dest='units',help='displacement, velocity, or acceleration (or d,v,a)')
+parser.add_argument('--scale', action='store', dest='scale',help='amplitude scaling factor')
+parser.add_argument('--dt', action='store', dest='dt',help='sampling interval in sec')
+parser.add_argument('--kernelwidth', action='store', dest='kernelwidth',help='width of sinc resampling kernel')
+
+parser.add_argument('--origin','--origintime', action='store', dest='originstring',help='end time YYYY-MM-DDTHH:MM:SS')
+parser.add_argument('--s','--start','--starttime', action='store', dest='startstring',help='source time YYYY-MM-DDTHH:MM:SS or PHASE+-offset')
+parser.add_argument('--e','--end','-endtime', action='store', dest='endstring',help='end time YYYY-MM-DDTHH:MM:SS or PHASE+-offset or offset_from_start')
+
+parser.add_argument('--N','--network', action='store', dest='network',help='network')
+parser.add_argument('--S','--station', action='store', dest='station',help='station')
+parser.add_argument('--rlat', action='store', dest='rlat',help='reciver lat')
+parser.add_argument('--rlon', action='store', dest='rlon',help='receiver lon')
+parser.add_argument('--Ncode','--netcode', action='store', dest='netcode',help='networkcode')
+parser.add_argument('--Scode','--stacode', action='store', dest='stacode',help='stationcode')
+parser.add_argument('--Lcode','--loccode', action='store', dest='loccode',help='locationcode')
+
+parser.add_argument('--evid', action='store', dest='evid',help='event id')
+parser.add_argument('--slat', action='store', dest='slat',help='source lat')
+parser.add_argument('--slon', action='store', dest='slon',help='source lon')
+parser.add_argument('--sdepm', action='store', dest='sdepm',help='source depth in meters')
+
+parser.add_argument('--mt','--sourcemomenttensor', action='store', dest='momentstring',help='moment: mrr,mtt,mpp,mrt,mrp,mtp in N-m (1 J = 1 N-m = 1e7 dyne-cm).  Comma delimited, no spaces or brackets.')
+parser.add_argument('--dc','--sourcedoublecouple', action='store', dest='doublecouplestring',help='strike,dip,rake[,ScalarMoment_in_NM]')
+parser.add_argument('--force','--sourceforce', action='store', dest='forcestring',help='force source in NM: Fr,Ft,Fp')
+
+
+
+
+results = parser.parse_args()
+helpmenu = results.helpmenu
+ReceiverFile = results.ReceiverFile
+evid = results.evid
+slat = results.slat
+slon = results.slon
+sdepm = results.sdepm
+rlat = results.rlat
+rlon = results.rlon
+networkinput = results.network
+stationinput = results.station
+netcode = results.netcode
+stacode = results.stacode
+loccode = results.loccode
+network = results.network
+station = results.station
+momentstring = results.momentstring
+doublecouplestring = results.doublecouplestring
+forcestring = results.forcestring
+startstring = results.startstring
+originstring = results.originstring
+endstring = results.endstring
+components = results.components
+units = results.units
+scale = results.scale
+dt = results.dt
+kernelwidth = results.kernelwidth
+modelstring = results.model
+formatstring = results.formatstring
+outfile = results.outfile
+label = results.label
+
+#---------- help menu
+
+if ( helpmenu is True  ):
+    print ('')
+    print ('FetchSyn: collect Syngine synthetic seismograms (version 2015.300)')
+    print ('http://service.iris.edu/clients')
+    print ('')
+    print ('Usage: FetchSyn [options]')
+    print ('')
+    print (' EXAMPLES')
+    print (' FetchSyn --recfile rec.txt --slat 38.3 --slon 142.3 --sdepm 24400 --dc 203,10,88,5.3e22')
+    print (' FetchSyn --N IU --S ANMO,KIP --evid GCMT:M201103110546A')
+    print (' FetchSyn --N _GSN --evid GCMT:M201103110546A --model iasp91_2s --dt 0.05 --label TOHOKU')
+    print ('          --format mseed --C ZRT --units velocity --s P-10 --e 300')
+    print (' ')
+    print ('Options:         ')
+    print ('------------- At least one receiver required -----')
+    print ('--recfile            Text file with list of receivers (NET STA) or ')
+    print ('                         (RLAT RLON [netcode stacode loccode])')
+    print ('--N, --net           Network name.  Virtual nets valid e.g. : _GSN')
+    print ('--S, --sta           Station name, or comma separated names')
+    print ('--rlat               Receiver latitude')
+    print ('--rlon               Receiver longitude')
+    print ('--Ncode,--netcode    Network name when rlat/rlon used')
+    print ('--Scode,--stacode    Station name when rlat/rlon used')
+    print ('--Lcode,--loccode    Location code for synthetic')
+    print ('------------- A source is required ---------------')
+    print ('--evid               Event id [catalog]:[eventid] e.g. GCMT:C201002270634A' )
+    print ('--slat               Source latitude')
+    print ('--slon               Source longitude ')
+    print ('--sdepm              Source depth in meters ')
+    print ('--mt                 Source moment tensor in NM (mrr,mtt,mpp,mrt,mrp,mtp)')
+    print ('--dc                 Source double couple (strike,dip,rake [,scalar moment])')
+    print ('--force              Source force in NM (Fr,Ft,Fp)')
+    print ('------------- Optional --------------------------')
+    print ('--model              Model name  http://ds.iris.edu/ds/products/syngine/#models')
+    print ('--format             Either miniseed or saczip for output')
+    print ('--label              Apply a label to be included in file names')
+    print ('--C, --components    Orientation, any combination of ZNERT')
+    print ('--units              Either (D)displacement, (V)velocity or (A)acceleration')
+    print ('--dt                 Sampling interval in seconds')
+    print ('--kernelwidth        Width of the sinc kernel used for resampling')
+    print ('--o, --origintime    Source origin time (YYYY-MM-DD,HH:MM:SS)')
+    print ('--s, --starttime     Trace start time (YYYY-MM-DD,HH:MM:SS) or phase-+offset e.g. P+10')
+    print ('                         or offset from origin time in seconds')
+    print ('--e, --endtime       Trace end time (YYYY-MM-DD,HH:MM:SS) or phase-+offset or duration_in_s')
+    print (' ')
+    print (' ')
+
+#---------- Make sure there is a source and a receiver
+
+if ( rlat is None and rlon is None and network is None and station is None and ReceiverFile is None ):
+    print ('Error: a receiver is required ')
+    exit()
+if ( slat is None and slon is None and evid is None ):
+    print ('Error: a source is required ')
+    exit()
+
+#---------- validate model
+
+if ( modelstring is not None ):
+    model_list = ['iasp91_2s','prem_a_5s','prem_a_10s','prem_a_20s','ak135f_5s']
+    if ( modelstring not in model_list) :
+        print ('Error: invalid model name:',model,' List: http://ds.iris.edu/ds/products/syngine')
+        exit()
+
+#---------- validate format
+
+if ( formatstring is not None ):
+    format_list = ['mseed','miniseed','ms','sac','SAC','zip','saczip']
+    if ( formatstring not in format_list) :
+        print ('Error: invalid format type:',formatstring,' Must be miniseed or saczip ')
+        exit()
+    if ( formatstring[0] == 'm' ):
+        formatstring = 'miniseed'
+    else:
+        formatstring = 'saczip'
+
+#---------- validate components
+
+if ( components is not None ):
+    component_list = ['Z','N','E','R','T']
+    while re.search(r'([A-Z])(.*)\1', components):
+        components = re.sub(r'([A-Z])(.*)\1', r'\1\2', components)
+    for i in range(len(components)):
+        if ( components[i] not in component_list) :
+            print ('Error: invalid components:',components,' Must be any combination of ZNERT ')
+            exit()
+
+#---------- validate units
+
+if ( units is not None ):
+    unit_list = ['displacement','velocity','acceleration','d','v','a','D','V','A']
+    if ( units not in unit_list) :
+        print ('Error: invalid unit type:',unit,' Must be displacement,velocity,acceleration,d,v,or a ')
+        exit()
+    if ( units == 'd' or units == 'D' ):
+        units = 'displacement'
+    if ( units == 'v' or units == 'V' ):
+        units = 'velocity'
+    if ( units == 'a' or units == 'A' ):
+        units = 'acceleration'
+
+#---------- validate scale
+
+if ( scale is not None ):
+    scalecheck = check_number(scale,-1e26,1e26)
+    if ( scalecheck != 0 ):
+        print ('Error: bad value for scale:',scale,' Must be between -1e26 and 1e26')
+        exit()
+
+#--------- validate dt
+
+if ( dt is not None ):
+    dtcheck = check_number(dt,0.001,5)
+    if ( dtcheck != 0 ):
+        print ('Error: bad value for dt:',dt,' Must be between 0.001 and 5')
+        exit()
+
+#---------- validate kernelwidth
+
+if ( kernelwidth is not None ):
+    kernelwidthcheck = check_number(kernelwidth,1,1000)
+    if ( kernelwidthcheck != 0 ):
+        if ( isinstance(kernelwidth,int) == False ):
+            print ('Error: bad value for kernelwidth:',kernelwidth,' Must be positive integer')
+            exit()
+    kernelwidth = int(float(kernelwidth))
+
+#---------- validate source location: slat,slon,sdepm
+
+if ( slat is not None ):
+    slatcheck = check_number(slat,-90,90)
+    if ( slatcheck != 0 ):
+        print ('Error: bad value for slat',slat,' Must be between -90 and 90.')
+        exit()
+
+if ( slon is not None ):
+    sloncheck = check_number(slon,-180,360)
+    if ( sloncheck != 0 ):
+        print ('Error: bad value for slon',slon,' Must be between -180 and 360.')
+        exit()
+    if ( float(slon) > 180 ):
+       slonF = float(slon) - 360
+       slon = str(slonF)
+
+if ( sdepm is not None ):
+    sdepmcheck = check_number(sdepm,0,700000)
+    if ( sdepmcheck != 0 ):
+        print ('Error: bad value for sdepm',sdepm,' Must be between 0 and 700000.')
+        exit()
+
+if ( slat is not None and slon is not None and sdepm is None ):
+    print ('Error: sourcedepthinmeters (sdepm) is required when using slat & slon ')
+    exit()
+
+#---------- take care of the origntime if given
+
+if ( originstring is not None ):
+    origin = originstring.replace(':',',')
+    origin = origin.replace('T',',')
+    origin = origin.replace('-',',')
+    origin = origin.replace('/',',')
+    origin = origin.split(',')
+    if ( len(origin) != 6):
+        print ('Error: invalid origintime format. Use: 1900,1,31,23,59,59 or 1900-12-31T23:59:59')
+        exit()
+    else:
+        origin = origin[0] + "-" + origin[1] + "-" + origin[2] + "T" + origin[3] + ":" + origin[4] + ":" + origin[5]
+
+#---------- take care of the starttime if given
+
+if ( startstring is not None ):
+    start = startstring.replace(':',',')
+    start = start.replace('T',',')
+    start = start.replace('/',',')
+    start = start.replace('-',',')
+    start = start.replace('+',',')
+    start = start.split(',')
+    if ( len(start) == 6 ):
+        start = start[0] + "-" + start[1] + "-" + start[2] + "T" + start[3] + ":" + start[4] + ":" + start[5]
+    elif ( len(start) == 2 ):
+        startcheck = check_number(start[1],0,18000)
+        if ( startcheck !=0 ):
+            print ('Error: invalid starttime:',startstring,' Valid: 1900,01,31,23,59,0 or 1900-01-31T23:59:0 or P-20 or ScS+200 or 100')
+            exit()
+        else:
+            start=startstring
+            start = start.replace('+','%2B')
+    elif ( len(start) == 1):
+        startcheck = check_number(start[0],0,18000)
+        if ( startcheck !=0 ):
+            print ('Error: invalid starttime:',startstring,' Valid: 1900,01,31,23,59,0 or 1900-01-31T23:59:0 or P-20 or ScS+200 or 100')
+            exit()
+        else:
+            start=startstring
+    else:
+        print ('Error: invalid starttime:',startstring,' Valid: 1900,01,31,23,59,0 or 1900-01-31T23:59:0 or P-20 or ScS+200 or 100')
+        exit()
+
+#---------- take care of the endtime if given
+
+if ( endstring is not None ):
+    end = endstring.replace(':',',')
+    end = end.replace('T',',')
+    end = end.replace('/',',')
+    end = end.replace('-',',')
+    end = end.replace('+',',')
+    end = end.split(',')
+    if ( len(end) == 6 ):
+        end = end[0] + "-" + end[1] + "-" + end[2] + "T" + end[3] + ":" + end[4] + ":" + end[5]
+    elif ( len(end) == 2 ):
+        endcheck = check_number(end[1],0,18000)
+        if ( endcheck !=0 ):
+            print ('Error: invalid endtime:',endstring,' Valid: 1900,01,31,23,59,0 or 1900-01-31T23:59:0 or P-20 or ScS+200 or 100')
+            exit()
+        else:
+            end=endstring
+            end = end.replace('+','%2B')
+    elif ( len(end) == 1 ):
+        endcheck = check_number(end[0],0,18000)
+        if ( endcheck !=0 ):
+            print ('Error: invalid endtime:',endstring,' Valid: 1900,01,31,23,59,0 or 1900-01-31T23:59:0 or P-20 or ScS+200 or 100')
+            exit()
+        else:
+            end=endstring
+    else:
+        print ('Error: invalid endtime:',endstring,' Valid: 1900,01,31,23,59,0 or 1900-01-31T23:59:0 or P-20 or ScS+200 or 100')
+        exit()
+
+#---------- validate sourcemomenttensor
+
+if ( momentstring is not None ):
+    moment = momentstring.split(',')
+    if ( len(moment) != 6 ):
+        print ('Error: sourcemomenttensor must have 6 comma separated numbers')
+        exit()
+    else:
+        for i in range(0,len(moment)):
+            momentcheck = check_number(moment[i],-1e26,1e26)
+            if ( momentcheck != 0 ):
+                print ('Error: bad value for moment component ',i+1,':',moment[i],' Must be between -1e26 and 1e26 (Nm)')
+                exit()
+
+#---------- validate sourcedoublecouple
+
+if ( doublecouplestring is not None ):
+    doublecouple = doublecouplestring.split(',')
+    if ( len(doublecouple) == 3 or len(doublecouple) == 4 ):
+        strikecheck = check_number(doublecouple[0],-180,360)
+        if ( strikecheck != 0 ):
+            print ('Error: bad value for strike:',doublecouple[0],' Must be between -180 and 360')
+            exit()
+        dipcheck = check_number(doublecouple[1],0,90)
+        if ( dipcheck != 0 ):
+            print ('Error: bad value for dip:',doublecouple[1],' Must be between 0 and 90')
+            exit()
+        rakecheck = check_number(doublecouple[2],-180,360)
+        if ( rakecheck != 0 ):
+            print ('Error: bad value for rake:',doublecouple[2],' Must be between -180 and 180')
+            exit()
+        if ( len(doublecouple) == 4 ):
+            Mocheck = check_number(doublecouple[3],0,1e26)
+            if ( Mocheck != 0 ):
+                print ('Error: bad value for scalar moment :',doublecouple[3],' Must be between 0 and 1e26 (Nm)')
+                exit()
+    else:
+        print ('Error: sourcedoublecouple must have 3 or 4 comma separated numbers')
+        exit()
+
+#---------- validate sourceforce
+
+if ( forcestring is not None ):
+    force = forcestring.split(',')
+    if ( len(force) != 3 ):
+        print ('Error: sourceforce must have 3 comma separated numbers')
+        exit()
+    for i in range(0,len(force)):
+        forcecheck = check_number(force[i],-1e26,1e26)
+        if ( forcecheck != 0 ):
+            print ('Error: bad value for force component ',i+1,':',force[i],' Must be between -1e26 and 1e26 (Nm)')
+            exit()
+
+#---------- validate rlat & rlon
+
+if ( rlat is not None ):
+    rlatcheck = check_number(rlat,-90,90)
+    if ( rlatcheck != 0 ):
+        print ('Error: bad value for rlat',rlat,' Must be between -90 and 90.')
+        exit()
+
+if ( rlon is not None ):
+    rloncheck = check_number(rlon,-180,360)
+    if ( rloncheck != 0 ):
+        print ('Error: bad value for rlon',rlon,' Must be between -180 and 360.')
+        exit()
+    if ( float(rlon) > 180 ):
+        rlonF = float(rlon) - 360
+        rlon = str(rlonF)
+
+if ( stacode is None ):
+    stacode = 'S0001'
+
+#---------- validate the network(s)
+
+if ( network is not None ):
+    network = network.split(',')
+    Nnetworks = len(network)
+    if ( Nnetworks == 1 ):
+        netstring = 'http://service.iris.edu/fdsnws/station/1/query?level=network&format=text&network=' + network[0]
+        r=requests.get(netstring)
+        if ( r.status_code != 200 ):
+            print ('Error: invalid network: ', network)
+            exit()
+    else:
+        for i in range(0,Nnetworks):
+            r=requests.get('http://service.iris.edu/fdsnws/station/1/query?level=network&format=text&network=' + network[i])
+            if ( r.status_code != 200 ):
+                print ('Error: invalid network: ',network[i])
+                exit()
+
+#---------- validate the station(s)
+
+if ( station is not None ):
+    station = station.split(',')
+    Nstations = len(station)
+    if ( Nstations == 1 ):
+        stastring = 'http://service.iris.edu/fdsnws/station/1/query?level=station&format=text&network=' + network[0] + '&station=' + station[0]
+        r=requests.get(stastring)
+        if ( r.status_code != 200 ):
+            print ('Error: invalid net station: ',network[0], station)
+            exit()
+    else:
+        for i in range(0,Nstations):
+            r=requests.get('http://service.iris.edu/fdsnws/station/1/query?level=station&format=text&network=' + network[0] + '&station=' + station[i])
+            if ( r.status_code != 200 ):
+                print ('Error: invalid net station: ',network[0], station[i])
+                exit()
+    if ( station[0] == "*" ):
+        station = None;
+
+#---------- read in list of stations
+
+if ( ReceiverFile is not None ):
+    f = open(ReceiverFile,'r')
+    i = 0
+    ListReceivers = []
+    for line in f:
+        i=i+1
+        fields = line.split()
+        if ( len(fields) < 2 ):
+            print ('Error: invalid ReceiverFile line: ',line,' Must have at least (NET STAT) or (rlat rlon)')
+            exit()
+        else:
+            LR1 = fields[0]
+            LR2 = fields[1]
+            if any( c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" for c in LR1 ):
+                stastring = 'http://service.iris.edu/fdsnws/station/1/query?level=station&format=text&network=' + LR1 + '&station=' + LR2
+                r=requests.get(stastring)
+                if ( r.status_code != 200 ):
+                    print ('Error: invalid net station: ',LR1, LR2,' on line ',i,' of ',ReceiverFile)
+                    exit()
+                ListReceivers.append(line)
+            else:
+                LR1check = check_number(LR1,-90,90)
+                if ( LR1check != 0 ):
+                    print ('Error: bad value for rlat:',LR1,' on line ', i,' of ',ReceiverFile, ' Must be between -90 and 90.')
+                LR2check = check_number(LR2,-180,360)
+                if ( LR2check != 0 ):
+                    print ('Error: bad value for rlon:',LR2,' on line ', i,' of ',ReceiverFile, ' Must be between -180 and 360.')
+                LR_Lon = float(LR2)
+                if ( LR_Lon > 180 ):
+                    LR_Lon = LR_Lon - 360
+                Nfields = len(fields)
+                NewLine = LR1 + " " + str(LR_Lon)
+                if any ( c in "code" for c in line ):
+                    if ( Nfields == 3 ):
+                        NewLine = NewLine + " " + fields[2]
+                    if ( Nfields == 4 ):
+                        NewLine = NewLine + " " + fields[2] + " " + fields[3]
+                    if ( Nfields == 5 ):
+                        NewLine = NewLine + " " + fields[2] + " " + fields[3] + " " + fields[4]
+                else:
+                    if ( Nfields == 3 ):
+                         NewLine = NewLine + " stacode=" + fields[2]
+                    if ( Nfields == 4 ):
+                        NewLine = NewLine + " netcode=" + fields[2] + " stacode=" + fields[3]
+                    if ( Nfields == 5 ):
+                        NewLine = NewLine + " netcode=" + fields[2] + " stacode=" + fields[3] + " loccode=" + fields[4]
+                if ( Nfields == 2 ):
+                    NewLine = NewLine + " stacode=S" + str(i).zfill(4)
+                ListReceivers.append(NewLine)
+    NReceivers = i
+
+#------------- Build the POST file for the webservice query -----------
+
+url = ""
+
+if ( modelstring is not None):
+    url = url + "\nmodel=" + modelstring
+
+if ( formatstring is not None ):
+    url = url + "\nformat=" + formatstring
+
+if ( label is not None ):
+    url = url + "\nlabel=" + label
+
+if ( components is not None ):
+    url = url + "\ncomponents=" + components
+
+if ( units is not None ):
+    url = url + "\nunits=" + units
+
+if ( scale is not None ):
+    url = url + "\nscale=" + scale
+
+if ( dt is not None ):
+    url = url + "\ndt=" + dt
+
+if ( kernelwidth is not None ):
+    url = url + "\nkernelwidth=" + kernelwidth
+
+if ( originstring is not None ):
+    url = url + "\norigintime=" + origin
+
+if ( startstring is not None ):
+    url = url + "\nstarttime=" + start
+
+if ( endstring is not None ):
+    url = url + "\nendtime=" + end
+
+if ( evid is not None ):
+    url = url + "\neventid=" + evid
+
+if ( slat is not None ):
+    url = url + "\nsourcelatitude=" + slat
+
+if ( slon is not None ):
+    url = url + "\nsourcelongitude=" + slon
+
+if ( sdepm is not None ):
+    url = url + "\nsourcedepthinmeters=" + sdepm
+
+if ( network is not None ):
+    if ( station is not None ):
+        for i in range(0,Nstations):
+            url = url + "\n" + network[0] + " " + station[i]
+    else:
+        for i in range(0,Nnetworks):
+            url = url + "\n" + network[i] + " *" 
+
+if ( rlat is not None and rlon is not None ):
+    url = url + "\n" + rlat + " " + rlon
+    if ( netcode is not None ):
+        url = url + " netcode=" + netcode + " "
+    if ( stacode is not None ):
+        url = url + " stacode=" + stacode + " "
+    if ( loccode is not None ):
+        url = url + " loccode=" + loccode 
+
+if ( ReceiverFile is not None ):
+    for i in range(0,NReceivers):
+        url = url + "\n" + ListReceivers[i]
+
+inputstring = StringIO.StringIO(url)
+print ('-------- your POST file ---------')
+print (url)
+print ('---------------------------------')
+
+#------------- Build the output file name ------------
+
+if ( outfile is not None ):
+    outputfile = outfile + ".zip"
+    if ( formatstring == 'miniseed' ):
+        outputfile = outfile + ".mseed"
+elif ( label is not None ):
+    outputfile = label + ".zip"
+    if ( formatstring == 'miniseed' ):
+        outputfile = label + ".mseed"
+else:
+    outputfile = 'Synthetics.zip'
+    if ( formatstring == 'miniseed' ):
+        outputfile = 'Synthetics.mseed'
+
+#------------- Make the request --------------
+
+with open(outputfile, 'wb') as output:
+    r = requests.post(url="http://service.iris.edu/irisws/syngine/1/query", data=inputstring)
+    if ( r.status_code == 200 ):
+        print ('status = 200.  Successful request.  Writing output to: ',outputfile)
+        output.write(r.content)
+    else:
+        print ('Request was not served, status_code:',r.status_code,r.headers,'-----',r.content)
+
+now = datetime.datetime.utcnow()
+print (now.strftime("%Y-%m-%d %H:%M:%S"), 'UTC')
+
+CurrentTime1 = time.time()
+print ('Request took: ',CurrentTime1-CurrentTime0,'seconds')
+if ( formatstring is not 'miniseed' ):
+    print ('Logfile:  Synthetics.log')
+
