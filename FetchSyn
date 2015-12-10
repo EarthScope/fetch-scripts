@@ -14,7 +14,7 @@
 #
 # Python Dependencies:
 #    *must have the requests package
-#    *if using python3, the user must change from StringIO to io.StringIO 
+#    *currently written for python2
 #
 # FetchSyn usage: A source and receiver is required, everything else has a default.
 #
@@ -81,7 +81,6 @@ import time
 import argparse
 import csv
 import StringIO
-#import io.StringIO   #--- Python3 users will have to change to this
 
 ########################
 # Used to check if an input number is an actual number and within bounds
