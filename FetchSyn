@@ -14,7 +14,7 @@
 #
 # Python Dependencies:
 #    *must have the requests package
-#    *currently written for python2
+#    *currently written for python2 and python3
 #
 # FetchSyn usage: A source and receiver is required, everything else has a default.
 #
@@ -67,8 +67,13 @@
 #
 # ## Change history ##
 #
-#  2015.342:
+#  2015.343:
 #  -Initial release
+#
+#  2015:345:
+#  -Removed modelname validation, since server already does that.
+#  -added .strip() to slat & slon to remove whitespace when negative values added
+#  -updated error messaging
 #
 #  Author: Alex Hutko, IRIS Data Management Center
 
@@ -80,7 +85,12 @@ import sys
 import time
 import argparse
 import csv
-import StringIO
+try:
+    import StringIO
+    pythonversion = 2
+except ImportError:
+    from io import BytesIO
+    pythonversion = 3
 
 ########################
 # Used to check if an input number is an actual number and within bounds
@@ -230,14 +240,6 @@ if ( rlat is None and rlon is None and network is None and station is None and R
 if ( slat is None and slon is None and evid is None ):
     print ('Error: a source is required ')
     exit()
-
-#---------- validate model
-
-if ( modelstring is not None ):
-    model_list = ['iasp91_2s','prem_a_5s','prem_a_10s','prem_a_20s','ak135f_5s']
-    if ( modelstring not in model_list) :
-        print ('Error: invalid model name:',model,' List: http://ds.iris.edu/ds/products/syngine')
-        exit()
 
 #---------- validate format
 
@@ -568,6 +570,7 @@ if ( ReceiverFile is not None ):
     NReceivers = i
 
 #------------- Build the POST file for the webservice query -----------
+#-------- Two versions here since python 2 vs 3 handle StrinIO differently -----
 
 url = ""
 
@@ -608,10 +611,10 @@ if ( evid is not None ):
     url = url + "\neventid=" + evid
 
 if ( slat is not None ):
-    url = url + "\nsourcelatitude=" + slat
+    url = url + "\nsourcelatitude=" + slat.strip()
 
 if ( slon is not None ):
-    url = url + "\nsourcelongitude=" + slon
+    url = url + "\nsourcelongitude=" + slon.strip()
 
 if ( sdepm is not None ):
     url = url + "\nsourcedepthinmeters=" + sdepm
@@ -637,10 +640,18 @@ if ( ReceiverFile is not None ):
     for i in range(0,NReceivers):
         url = url + "\n" + ListReceivers[i]
 
-inputstring = StringIO.StringIO(url)
 print ('-------- your POST file ---------')
 print (url)
 print ('---------------------------------')
+
+if ( pythonversion == 2 ):
+    inputstring = StringIO.StringIO(url)
+elif ( pythonversion == 3 ):
+    url = bytes(url,encoding="ascii")
+    inputstring = BytesIO(url)
+else:
+    print ('StringIO is incompatible with this version of python. Try v2.X or v3')
+    exit()
 
 #------------- Build the output file name ------------
 
@@ -664,14 +675,15 @@ with open(outputfile, 'wb') as output:
     if ( r.status_code == 200 ):
         print ('status = 200.  Successful request.  Writing output to: ',outputfile)
         output.write(r.content)
+        if ( formatstring is not 'miniseed' ):
+            print ('Logfile:  Synthetics.log')
     else:
-        print ('Request was not served, status_code:',r.status_code,r.headers,'-----',r.content)
+        print ('Request was not served. ',r.status_code,r.content)
 
 now = datetime.datetime.utcnow()
 print (now.strftime("%Y-%m-%d %H:%M:%S"), 'UTC')
 
 CurrentTime1 = time.time()
 print ('Request took: ',CurrentTime1-CurrentTime0,'seconds')
-if ( formatstring is not 'miniseed' ):
-    print ('Logfile:  Synthetics.log')
+
 
