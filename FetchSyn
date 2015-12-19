@@ -75,6 +75,12 @@
 #  -added .strip() to slat & slon to remove whitespace when negative values added
 #  -updated error messaging
 #
+#  2015.352:
+#  -added support for the doublecouple, momenttensors & force sources.
+#  -added .strip() to rlat,rlon,dc,mt, and force to remove whitespace when negative 
+#   values added
+#  -modified argparse flags to accept single dash arguments
+#
 #  Author: Alex Hutko, IRIS Data Management Center
 
 from __future__ import print_function
@@ -114,42 +120,39 @@ for i, arg in enumerate(sys.argv):
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--recfile','--ReceiverFile', action='store', dest='ReceiverFile',help='receiver file name with NET STATION')
-parser.add_argument('--u', action='store_true', dest='helpmenu',help='extended HELP MENU')
-parser.add_argument('--outfile', action='store', dest='outfile',help='output file label' )
+parser.add_argument('-recfile','--recfile','--ReceiverFile', action='store', dest='ReceiverFile',help='receiver file name with NET STATION')
+parser.add_argument('-u','--u', action='store_true', dest='helpmenu',help='extended HELP MENU')
+parser.add_argument('-outfile','--outfile', action='store', dest='outfile',help='output file label' )
 
-parser.add_argument('--model', action='store', dest='model',help='model from list: http://ds.iris.edu/ds/products/syngine' )
-parser.add_argument('--format', action='store', dest='formatstring',help='miniseed or saczip')
-parser.add_argument('--label', action='store', dest='label',help='label')
-parser.add_argument('--C','--components', action='store', dest='components',help='components: any combination of ZNERT')
-parser.add_argument('--units', action='store', dest='units',help='displacement, velocity, or acceleration (or d,v,a)')
-parser.add_argument('--scale', action='store', dest='scale',help='amplitude scaling factor')
-parser.add_argument('--dt', action='store', dest='dt',help='sampling interval in sec')
-parser.add_argument('--kernelwidth', action='store', dest='kernelwidth',help='width of sinc resampling kernel')
+parser.add_argument('-model','--model', action='store', dest='model',help='model from list: http://ds.iris.edu/ds/products/syngine' )
+parser.add_argument('-format','--format', action='store', dest='formatstring',help='miniseed or saczip')
+parser.add_argument('-label','--label', action='store', dest='label',help='label')
+parser.add_argument('-C','--C','--components', action='store', dest='components',help='components: any combination of ZNERT')
+parser.add_argument('-units','--units', action='store', dest='units',help='displacement, velocity, or acceleration (or d,v,a)')
+parser.add_argument('-scale','--scale', action='store', dest='scale',help='amplitude scaling factor')
+parser.add_argument('-dt','--dt', action='store', dest='dt',help='sampling interval in sec')
+parser.add_argument('-kernelwidth','--kernelwidth', action='store', dest='kernelwidth',help='width of sinc resampling kernel')
 
-parser.add_argument('--origin','--origintime', action='store', dest='originstring',help='end time YYYY-MM-DDTHH:MM:SS')
-parser.add_argument('--s','--start','--starttime', action='store', dest='startstring',help='source time YYYY-MM-DDTHH:MM:SS or PHASE+-offset')
-parser.add_argument('--e','--end','-endtime', action='store', dest='endstring',help='end time YYYY-MM-DDTHH:MM:SS or PHASE+-offset or offset_from_start')
+parser.add_argument('-origin','-origintime','--origin','--origintime', action='store', dest='originstring',help='end time YYYY-MM-DDTHH:MM:SS')
+parser.add_argument('-s','-start','-starttime','--s','--start','--starttime', action='store', dest='startstring',help='source time YYYY-MM-DDTHH:MM:SS or PHASE+-offset')
+parser.add_argument('-e','-end','-endtime','--e','--end','-endtime', action='store', dest='endstring',help='end time YYYY-MM-DDTHH:MM:SS or PHASE+-offset or offset_from_start')
 
-parser.add_argument('--N','--network', action='store', dest='network',help='network')
-parser.add_argument('--S','--station', action='store', dest='station',help='station')
-parser.add_argument('--rlat', action='store', dest='rlat',help='reciver lat')
-parser.add_argument('--rlon', action='store', dest='rlon',help='receiver lon')
-parser.add_argument('--Ncode','--netcode', action='store', dest='netcode',help='networkcode')
-parser.add_argument('--Scode','--stacode', action='store', dest='stacode',help='stationcode')
-parser.add_argument('--Lcode','--loccode', action='store', dest='loccode',help='locationcode')
+parser.add_argument('-N','-network','--N','--network', action='store', dest='network',help='network')
+parser.add_argument('-S','-station','--S','--station', action='store', dest='station',help='station')
+parser.add_argument('-rlat','--rlat', action='store', dest='rlat',help='reciver lat')
+parser.add_argument('-rlon','--rlon', action='store', dest='rlon',help='receiver lon')
+parser.add_argument('-Ncode','--Ncode','--netcode', action='store', dest='netcode',help='networkcode')
+parser.add_argument('-Scode','--Scode','--stacode', action='store', dest='stacode',help='stationcode')
+parser.add_argument('-Lcode','--Lcode','--loccode', action='store', dest='loccode',help='locationcode')
 
-parser.add_argument('--evid', action='store', dest='evid',help='event id')
-parser.add_argument('--slat', action='store', dest='slat',help='source lat')
-parser.add_argument('--slon', action='store', dest='slon',help='source lon')
-parser.add_argument('--sdepm', action='store', dest='sdepm',help='source depth in meters')
+parser.add_argument('-evid','--evid', action='store', dest='evid',help='event id')
+parser.add_argument('-slat','--slat', action='store', dest='slat',help='source lat')
+parser.add_argument('-slon','--slon', action='store', dest='slon',help='source lon')
+parser.add_argument('-sdepm','--sdepm', action='store', dest='sdepm',help='source depth in meters')
 
-parser.add_argument('--mt','--sourcemomenttensor', action='store', dest='momentstring',help='moment: mrr,mtt,mpp,mrt,mrp,mtp in N-m (1 J = 1 N-m = 1e7 dyne-cm).  Comma delimited, no spaces or brackets.')
-parser.add_argument('--dc','--sourcedoublecouple', action='store', dest='doublecouplestring',help='strike,dip,rake[,ScalarMoment_in_NM]')
-parser.add_argument('--force','--sourceforce', action='store', dest='forcestring',help='force source in NM: Fr,Ft,Fp')
-
-
-
+parser.add_argument('-mt','--mt','--sourcemomenttensor', action='store', dest='momentstring',help='moment: mrr,mtt,mpp,mrt,mrp,mtp in N-m (1 J = 1 N-m = 1e7 dyne-cm).  Comma delimited, no spaces or brackets.')
+parser.add_argument('-dc','--dc','--sourcedoublecouple', action='store', dest='doublecouplestring',help='strike,dip,rake[,ScalarMoment_in_NM]')
+parser.add_argument('-force','--force','-forces','--forces','--sourceforce', action='store', dest='forcestring',help='force source in NM: Fr,Ft,Fp')
 
 results = parser.parse_args()
 helpmenu = results.helpmenu
@@ -549,7 +552,7 @@ if ( ReceiverFile is not None ):
                 if ( LR_Lon > 180 ):
                     LR_Lon = LR_Lon - 360
                 Nfields = len(fields)
-                NewLine = LR1 + " " + str(LR_Lon)
+                NewLine = LR1 + " " + str(LR_Lon).strip()
                 if any ( c in "code" for c in line ):
                     if ( Nfields == 3 ):
                         NewLine = NewLine + " " + fields[2]
@@ -619,6 +622,15 @@ if ( slon is not None ):
 if ( sdepm is not None ):
     url = url + "\nsourcedepthinmeters=" + sdepm
 
+if ( momentstring is not None ):
+   url = url + "\nsourcemomenttensor=" + momentstring.strip()
+
+if ( doublecouplestring is not None ):
+   url = url + "\nsourcedoublecouple=" + doublecouplestring.strip()
+
+if ( forcestring is not None ):
+   url = url + "\nsourceforce=" + forcestring.strip()
+
 if ( network is not None ):
     if ( station is not None ):
         for i in range(0,Nstations):
@@ -628,7 +640,7 @@ if ( network is not None ):
             url = url + "\n" + network[i] + " *" 
 
 if ( rlat is not None and rlon is not None ):
-    url = url + "\n" + rlat + " " + rlon
+    url = url + "\n" + rlat.strip() + " " + rlon.strip()
     if ( netcode is not None ):
         url = url + " netcode=" + netcode + " "
     if ( stacode is not None ):
