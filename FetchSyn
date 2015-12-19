@@ -59,11 +59,11 @@
 #      files (saczip).  SAC files will have the headers populated.
 #
 # QUICK EXAMPLES
-#  FetchSyn.py -recfile rec.txt -slat 38.3 -slon 142.3 -sdepm 24400 -dc 203,10,88,5.3e22
-#  FetchSyn.py -N IU -S ANMO,KIP -evid GCMT:M201103110546A
-#  FetchSyn.py -N IU -S ANMO,KIP -evid GCMT:M201103110546A -sdepm 35000
-#  FetchSyn.py -N _GSN -evid GCMT:M201103110546A -model iasp91_2s -dt 0.05 -label TOHOKU
-#                -format mseed -C ZRT -units velocity -s P-10 -e 300
+#  FetchSyn -recfile rec.txt -slat 38.3 -slon 142.3 -sdepm 24400 -dc 203,10,88,5.3e22
+#  FetchSyn -N IU -S ANMO,KIP -evid GCMT:M201103110546A
+#  FetchSyn -N IU -S ANMO,KIP -evid GCMT:M201103110546A -sdepm 35000
+#  FetchSyn -N _GSN -evid GCMT:M201103110546A -model iasp91_2s -dt 0.05 -label TOHOKU
+#           -format mseed -C ZRT -units velocity -s P-10 -e 300
 #
 # ## Change history ##
 #
@@ -196,42 +196,42 @@ if ( helpmenu is True  ):
     print ('Usage: FetchSyn [options]')
     print ('')
     print (' EXAMPLES')
-    print (' FetchSyn --recfile rec.txt --slat 38.3 --slon 142.3 --sdepm 24400 --dc 203,10,88,5.3e22')
-    print (' FetchSyn --N IU --S ANMO,KIP --evid GCMT:M201103110546A')
-    print (' FetchSyn --N _GSN --evid GCMT:M201103110546A --model iasp91_2s --dt 0.05 --label TOHOKU')
-    print ('          --format mseed --C ZRT --units velocity --s P-10 --e 300')
+    print (' FetchSyn -recfile rec.txt -slat 38.3 -slon 142.3 -sdepm 24400 -dc 203,10,88,5.3e22')
+    print (' FetchSyn -N IU -S ANMO,KIP -evid GCMT:M201103110546A')
+    print (' FetchSyn -N _GSN -evid GCMT:M201103110546A -model iasp91_2s -dt 0.05 -label TOHOKU')
+    print ('          -format mseed -C ZRT -units velocity -s P-10 -e 300')
     print (' ')
     print ('Options:         ')
     print ('------------- At least one receiver required -----')
-    print ('--recfile            Text file with list of receivers (NET STA) or ')
+    print ('-recfile            Text file with list of receivers (NET STA) or ')
     print ('                         (RLAT RLON [netcode stacode loccode])')
-    print ('--N, --net           Network name.  Virtual nets valid e.g. : _GSN')
-    print ('--S, --sta           Station name, or comma separated names')
-    print ('--rlat               Receiver latitude')
-    print ('--rlon               Receiver longitude')
-    print ('--Ncode,--netcode    Network name when rlat/rlon used')
-    print ('--Scode,--stacode    Station name when rlat/rlon used')
-    print ('--Lcode,--loccode    Location code for synthetic')
+    print ('-N, -net           Network name.  Virtual nets valid e.g. : _GSN')
+    print ('-S, -sta           Station name, or comma separated names')
+    print ('-rlat               Receiver latitude')
+    print ('-rlon               Receiver longitude')
+    print ('-Ncode,-networkcode    Network name when rlat/rlon used')
+    print ('-Scode,-stationcode    Station name when rlat/rlon used')
+    print ('-Lcode,-locationcode   Location code for synthetic')
     print ('------------- A source is required ---------------')
-    print ('--evid               Event id [catalog]:[eventid] e.g. GCMT:C201002270634A' )
-    print ('--slat               Source latitude')
-    print ('--slon               Source longitude ')
-    print ('--sdepm              Source depth in meters ')
-    print ('--mt                 Source moment tensor in NM (mrr,mtt,mpp,mrt,mrp,mtp)')
-    print ('--dc                 Source double couple (strike,dip,rake [,scalar moment])')
-    print ('--force              Source force in NM (Fr,Ft,Fp)')
+    print ('-evid               Event id [catalog]:[eventid] e.g. GCMT:C201002270634A' )
+    print ('-slat               Source latitude')
+    print ('-slon               Source longitude ')
+    print ('-sdepm              Source depth in meters ')
+    print ('-mt                 Source moment tensor in NM (mrr,mtt,mpp,mrt,mrp,mtp)')
+    print ('-dc                 Source double couple (strike,dip,rake [,scalar moment])')
+    print ('-force              Source force in NM (Fr,Ft,Fp)')
     print ('------------- Optional --------------------------')
-    print ('--model              Model name  http://ds.iris.edu/ds/products/syngine/#models')
-    print ('--format             Either miniseed or saczip for output')
-    print ('--label              Apply a label to be included in file names')
-    print ('--C, --components    Orientation, any combination of ZNERT')
-    print ('--units              Either (D)displacement, (V)velocity or (A)acceleration')
-    print ('--dt                 Sampling interval in seconds')
-    print ('--kernelwidth        Width of the sinc kernel used for resampling')
-    print ('--o, --origintime    Source origin time (YYYY-MM-DD,HH:MM:SS)')
-    print ('--s, --starttime     Trace start time (YYYY-MM-DD,HH:MM:SS) or phase-+offset e.g. P+10')
+    print ('-model              Model name  http://ds.iris.edu/ds/products/syngine/#models')
+    print ('-format             Either miniseed or saczip for output')
+    print ('-label              Apply a label to be included in file names')
+    print ('-C, -components    Orientation, any combination of ZNERT')
+    print ('-units              Either (D)displacement, (V)velocity or (A)acceleration')
+    print ('-dt                 Sampling interval in seconds')
+    print ('-kernelwidth        Width of the sinc kernel used for resampling')
+    print ('-o, -origintime    Source origin time (YYYY-MM-DD,HH:MM:SS)')
+    print ('-s, -starttime     Trace start time (YYYY-MM-DD,HH:MM:SS) or phase-+offset e.g. P+10')
     print ('                         or offset from origin time in seconds')
-    print ('--e, --endtime       Trace end time (YYYY-MM-DD,HH:MM:SS) or phase-+offset or duration_in_s')
+    print ('-e, -endtime       Trace end time (YYYY-MM-DD,HH:MM:SS) or phase-+offset or duration_in_s')
     print (' ')
     print (' ')
 
@@ -305,7 +305,7 @@ if ( kernelwidth is not None ):
         if ( isinstance(kernelwidth,int) == False ):
             print ('Error: bad value for kernelwidth:',kernelwidth,' Must be positive integer')
             exit()
-    kernelwidth = int(float(kernelwidth))
+    kernelwidth = str(int(float(kernelwidth)))
 
 #---------- validate source location: slat,slon,sdepm
 
