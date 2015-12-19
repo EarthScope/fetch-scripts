@@ -141,9 +141,9 @@ parser.add_argument('-N','-network','--N','--network', action='store', dest='net
 parser.add_argument('-S','-station','--S','--station', action='store', dest='station',help='station')
 parser.add_argument('-rlat','--rlat', action='store', dest='rlat',help='reciver lat')
 parser.add_argument('-rlon','--rlon', action='store', dest='rlon',help='receiver lon')
-parser.add_argument('-Ncode','-netcode','--Ncode','--netcode', action='store', dest='netcode',help='networkcode')
-parser.add_argument('-Scode','-stacode','--Scode','--stacode', action='store', dest='stacode',help='stationcode')
-parser.add_argument('-Lcode','-loccode','--Lcode','--loccode', action='store', dest='loccode',help='locationcode')
+parser.add_argument('-Ncode','-networkcode','--Ncode','--networkcode', action='store', dest='netcode',help='networkcode')
+parser.add_argument('-Scode','-stationcode','--Scode','--stationcode', action='store', dest='stacode',help='stationcode')
+parser.add_argument('-Lcode','-locationcode','--Lcode','--locationcode', action='store', dest='loccode',help='locationcode')
 
 parser.add_argument('-evid','--evid', action='store', dest='evid',help='event id')
 parser.add_argument('-slat','--slat', action='store', dest='slat',help='source lat')
