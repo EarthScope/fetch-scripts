@@ -145,7 +145,7 @@ parser.add_argument('-Ncode','-networkcode','--Ncode','--networkcode', action='s
 parser.add_argument('-Scode','-stationcode','--Scode','--stationcode', action='store', dest='stacode',help='stationcode')
 parser.add_argument('-Lcode','-locationcode','--Lcode','--locationcode', action='store', dest='loccode',help='locationcode')
 
-parser.add_argument('-evid','--evid', action='store', dest='evid',help='event id')
+parser.add_argument('-evid','-eventid','--evid','--eventid', action='store', dest='evid',help='event id')
 parser.add_argument('-slat','--slat', action='store', dest='slat',help='source lat')
 parser.add_argument('-slon','--slon', action='store', dest='slon',help='source lon')
 parser.add_argument('-sdepm','--sdepm', action='store', dest='sdepm',help='source depth in meters')
