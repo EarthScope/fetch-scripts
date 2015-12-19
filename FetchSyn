@@ -59,11 +59,11 @@
 #      files (saczip).  SAC files will have the headers populated.
 #
 # QUICK EXAMPLES
-#  FetchSyn.py --recfile rec.txt --slat 38.3 --slon 142.3 --sdepm 24400 --dc 203,10,88,5.3e22
-#  FetchSyn.py --N IU --S ANMO,KIP --evid GCMT:M201103110546A
-#  FetchSyn.py --N IU --S ANMO,KIP --evid GCMT:M201103110546A --sdepm 35000
-#  FetchSyn.py --N _GSN --evid GCMT:M201103110546A --model iasp91_2s --dt 0.05 --label TOHOKU
-#                --format mseed --C ZRT --units velocity --s P-10 --e 300
+#  FetchSyn.py -recfile rec.txt -slat 38.3 -slon 142.3 -sdepm 24400 -dc 203,10,88,5.3e22
+#  FetchSyn.py -N IU -S ANMO,KIP -evid GCMT:M201103110546A
+#  FetchSyn.py -N IU -S ANMO,KIP -evid GCMT:M201103110546A -sdepm 35000
+#  FetchSyn.py -N _GSN -evid GCMT:M201103110546A -model iasp91_2s -dt 0.05 -label TOHOKU
+#                -format mseed -C ZRT -units velocity -s P-10 -e 300
 #
 # ## Change history ##
 #
@@ -141,9 +141,9 @@ parser.add_argument('-N','-network','--N','--network', action='store', dest='net
 parser.add_argument('-S','-station','--S','--station', action='store', dest='station',help='station')
 parser.add_argument('-rlat','--rlat', action='store', dest='rlat',help='reciver lat')
 parser.add_argument('-rlon','--rlon', action='store', dest='rlon',help='receiver lon')
-parser.add_argument('-Ncode','--Ncode','--netcode', action='store', dest='netcode',help='networkcode')
-parser.add_argument('-Scode','--Scode','--stacode', action='store', dest='stacode',help='stationcode')
-parser.add_argument('-Lcode','--Lcode','--loccode', action='store', dest='loccode',help='locationcode')
+parser.add_argument('-Ncode','-netcode','--Ncode','--netcode', action='store', dest='netcode',help='networkcode')
+parser.add_argument('-Scode','-stacode','--Scode','--stacode', action='store', dest='stacode',help='stationcode')
+parser.add_argument('-Lcode','-loccode','--Lcode','--loccode', action='store', dest='loccode',help='locationcode')
 
 parser.add_argument('-evid','--evid', action='store', dest='evid',help='event id')
 parser.add_argument('-slat','--slat', action='store', dest='slat',help='source lat')
