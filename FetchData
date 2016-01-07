@@ -247,6 +247,9 @@
 #  This mitigates long delays somewhat when data centers do not fail
 #  for a very long time.
 #
+# 2016.007:
+#  - Trim trailing slashes from service endpoint URLs as a conveniece.
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -259,7 +262,7 @@ use HTTP::Date;
 use Time::HiRes;
 use Tie::RefHash;
 
-my $version = "2015.341";
+my $version = "2016.007";
 
 my $scriptname = basename($0);
 
@@ -598,6 +601,12 @@ if ( $federate ) {
 }
 # Otherwise set up default (empty) data center
 else {
+  # Trim trailing slashes from service endpoints
+  $timeseriesservice =~ s/\/$//;
+  $metadataservice =~ s/\/$//;
+  $sacpzservice =~ s/\/$//;
+  $respservice =~ s/\/$//;
+
   # Add default/environmental entries to datacenter hash
   $datacenter{""}{timeseriesws} = $timeseriesservice;
   $datacenter{""}{metadataws} = $metadataservice;
