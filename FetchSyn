@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/Users/alex/anaconda/bin/python
+##!/usr/bin/env python
 #
 # FetchSyn
 #
@@ -81,9 +82,15 @@
 #   values added
 #  -modified argparse flags to accept single dash arguments
 #
+#  2016.007
+#  -added user-agent info sent with each request as well as user-added agent info.
+#
 #  Author: Alex Hutko, IRIS Data Management Center
 
 from __future__ import print_function
+
+FSversion = '2016.007'
+
 import requests
 import datetime
 import re
@@ -119,6 +126,8 @@ for i, arg in enumerate(sys.argv):
     if (arg[0] == '-') and arg[1].isdigit(): sys.argv[i] = ' ' + arg
 
 parser = argparse.ArgumentParser()
+
+parser.add_argument('-A','--A', action='store', dest='agent',help='UserAgent info')
 
 parser.add_argument('-recfile','--recfile','--ReceiverFile', action='store', dest='ReceiverFile',help='receiver file name with NET STATION')
 parser.add_argument('-u','--u', action='store_true', dest='helpmenu',help='extended HELP MENU')
@@ -156,6 +165,7 @@ parser.add_argument('-force','--force','-forces','--forces','--sourceforce', act
 
 results = parser.parse_args()
 helpmenu = results.helpmenu
+agent = results.agent
 ReceiverFile = results.ReceiverFile
 evid = results.evid
 slat = results.slat
@@ -205,8 +215,8 @@ if ( helpmenu is True  ):
     print ('------------- At least one receiver required -----')
     print ('-recfile            Text file with list of receivers (NET STA) or ')
     print ('                         (RLAT RLON [netcode stacode loccode])')
-    print ('-N, -net           Network name.  Virtual nets valid e.g. : _GSN')
-    print ('-S, -sta           Station name, or comma separated names')
+    print ('-N, -net            Network name.  Virtual nets valid e.g. : _GSN')
+    print ('-S, -sta            Station name, or comma separated names')
     print ('-rlat               Receiver latitude')
     print ('-rlon               Receiver longitude')
     print ('-Ncode,-networkcode    Network name when rlat/rlon used')
@@ -224,16 +234,23 @@ if ( helpmenu is True  ):
     print ('-model              Model name  http://ds.iris.edu/ds/products/syngine/#models')
     print ('-format             Either miniseed or saczip for output')
     print ('-label              Apply a label to be included in file names')
-    print ('-C, -components    Orientation, any combination of ZNERT')
+    print ('-C, -components     Orientation, any combination of ZNERT')
     print ('-units              Either (D)displacement, (V)velocity or (A)acceleration')
     print ('-dt                 Sampling interval in seconds')
     print ('-kernelwidth        Width of the sinc kernel used for resampling')
-    print ('-o, -origintime    Source origin time (YYYY-MM-DD,HH:MM:SS)')
-    print ('-s, -starttime     Trace start time (YYYY-MM-DD,HH:MM:SS) or phase-+offset e.g. P+10')
+    print ('-o, -origintime     Source origin time (YYYY-MM-DD,HH:MM:SS)')
+    print ('-s, -starttime      Trace start time (YYYY-MM-DD,HH:MM:SS) or phase-+offset e.g. P+10')
     print ('                         or offset from origin time in seconds')
-    print ('-e, -endtime       Trace end time (YYYY-MM-DD,HH:MM:SS) or phase-+offset or duration_in_s')
+    print ('-e, -endtime        Trace end time (YYYY-MM-DD,HH:MM:SS) or phase-+offset or duration_in_s')
+    print ('-A                  Add a user-agent string for identification ')
     print (' ')
-    print (' ')
+
+#---------- User-agent info
+
+agentstatement = 'FetchSyn/' + FSversion + ' Python/' + sys.version.split(' ')[0] + ' Requests/' + requests.__version__
+if ( agent is not None ):
+    agentstatement = agentstatement + ' (' + str(agent) + ')'
+user_agent = {'User-Agent': str(agentstatement) }
 
 #---------- Make sure there is a source and a receiver
 
@@ -488,13 +505,13 @@ if ( network is not None ):
     Nnetworks = len(network)
     if ( Nnetworks == 1 ):
         netstring = 'http://service.iris.edu/fdsnws/station/1/query?level=network&format=text&network=' + network[0]
-        r=requests.get(netstring)
+        r=requests.get(netstring,headers=user_agent)
         if ( r.status_code != 200 ):
             print ('Error: invalid network: ', network)
             exit()
     else:
         for i in range(0,Nnetworks):
-            r=requests.get('http://service.iris.edu/fdsnws/station/1/query?level=network&format=text&network=' + network[i])
+            r=requests.get('http://service.iris.edu/fdsnws/station/1/query?level=network&format=text&network=' + network[i],headers=user_agent)
             if ( r.status_code != 200 ):
                 print ('Error: invalid network: ',network[i])
                 exit()
@@ -506,13 +523,13 @@ if ( station is not None ):
     Nstations = len(station)
     if ( Nstations == 1 ):
         stastring = 'http://service.iris.edu/fdsnws/station/1/query?level=station&format=text&network=' + network[0] + '&station=' + station[0]
-        r=requests.get(stastring)
+        r=requests.get(stastring,headers=user_agent)
         if ( r.status_code != 200 ):
             print ('Error: invalid net station: ',network[0], station)
             exit()
     else:
         for i in range(0,Nstations):
-            r=requests.get('http://service.iris.edu/fdsnws/station/1/query?level=station&format=text&network=' + network[0] + '&station=' + station[i])
+            r=requests.get('http://service.iris.edu/fdsnws/station/1/query?level=station&format=text&network=' + network[0] + '&station=' + station[i],headers=user_agent)
             if ( r.status_code != 200 ):
                 print ('Error: invalid net station: ',network[0], station[i])
                 exit()
@@ -536,7 +553,7 @@ if ( ReceiverFile is not None ):
             LR2 = fields[1]
             if any( c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" for c in LR1 ):
                 stastring = 'http://service.iris.edu/fdsnws/station/1/query?level=station&format=text&network=' + LR1 + '&station=' + LR2
-                r=requests.get(stastring)
+                r=requests.get(stastring,headers=user_agent)
                 if ( r.status_code != 200 ):
                     print ('Error: invalid net station: ',LR1, LR2,' on line ',i,' of ',ReceiverFile)
                     exit()
@@ -683,7 +700,7 @@ else:
 #------------- Make the request --------------
 
 with open(outputfile, 'wb') as output:
-    r = requests.post(url="http://service.iris.edu/irisws/syngine/1/query", data=inputstring)
+    r = requests.post(url="http://service.iris.edu/irisws/syngine/1/query", data=inputstring,headers=user_agent)
     if ( r.status_code == 200 ):
         print ('status = 200.  Successful request.  Writing output to: ',outputfile)
         output.write(r.content)
@@ -697,5 +714,4 @@ print (now.strftime("%Y-%m-%d %H:%M:%S"), 'UTC')
 
 CurrentTime1 = time.time()
 print ('Request took: ',CurrentTime1-CurrentTime0,'seconds')
-
 
