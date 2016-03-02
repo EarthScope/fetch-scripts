@@ -248,7 +248,10 @@
 #  for a very long time.
 #
 # 2016.007:
-#  - Trim trailing slashes from service endpoint URLs as a conveniece.
+#  - Trim trailing slashes from service endpoint URLs as a convenience.
+#
+# 2016.062:
+#  - Trim trailing slash from SERVICEBASE values.
 #
 #  Author: Chad Trabant, IRIS Data Management Center
 
@@ -262,7 +265,7 @@ use HTTP::Date;
 use Time::HiRes;
 use Tie::RefHash;
 
-my $version = "2016.007";
+my $version = "2016.062";
 
 my $scriptname = basename($0);
 
@@ -271,6 +274,7 @@ my $servicebase = 'http://service.iris.edu';
 
 # Check for environment variable overrides for servicebase
 $servicebase = $ENV{'SERVICEBASE'} if ( exists $ENV{'SERVICEBASE'} );
+$servicebase =~ s/\/$//; # Trim trailing slash
 
 # Web service for time series data
 my $timeseriesservice = "$servicebase/fdsnws/dataselect/1";
