@@ -251,6 +251,7 @@
 #  - Trim trailing slashes from service endpoint URLs as a convenience.
 #
 # 2016.062:
+#  - Do not retry on 413 response and print server response on all non-auth errors.
 #  - Trim trailing slash from SERVICEBASE values.
 #
 #  Author: Chad Trabant, IRIS Data Management Center
@@ -1258,24 +1259,26 @@ sub FetchTimeSeriesData {
     }
     elsif ( ! $response->is_success() ) {
       print (STDERR "Error fetching time series data: "
-	     . $response->code . " :: " . status_message($response->code) . "\n");
+	     . $response->code . " :: " . $response->message . "\n");
 
       if ( $response->code == 429 ) {
-	print STDERR "Usage has exceeded data center limit, try making fewer concurrent requests\n";
+	print STDERR "Usage has exceeded data center limit, try making fewer concurrent requests\n\n";
       }
-      else {
-	print STDERR "------\n" . $response->decoded_content . "\n------\n";
-	print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
-      }
+
+      print STDERR "------\n" . $response->decoded_content . "\n------\n";
+      print STDERR "  URI: '$uri'\n" if ( $verbose > 1 );
 
       # Exit immediately if we are not retrying
       exit 1 if ( $noretry );
+
+      # Exit on fatal 400 (Bad Request) and 413 (Request Entity Too Large)
+      exit 1 if ( $response->code == 400 || $response->code == 413 );
 
       # For real output files rewind position to the end of the last group data
       seek (OUT, $outoffset, 0) if ( $outfile ne "-" );
 
       # Retry in 10 seconds or give up if already tried 10 times.
-      if ( $response->code != 400 && $fetchcnt < 10 ) {
+      if ( $fetchcnt < 10 ) {
 	print STDERR "Retrying request in 10 seconds\n";
 	sleep 10;
 	$fetchcnt++;
