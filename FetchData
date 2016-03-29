@@ -254,6 +254,10 @@
 #  - Do not retry on 413 response and print server response on all non-auth errors.
 #  - Trim trailing slash from SERVICEBASE values.
 #
+# 2016.089:
+#  - Optimize the matching of metadata to requests by avoiding Tie'd hashes and
+#  combining regular expressions for fewer match executions.
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -264,9 +268,8 @@ use LWP::UserAgent;
 use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
-use Tie::RefHash;
 
-my $version = "2016.062";
+my $version = "2016.089";
 
 my $scriptname = basename($0);
 
@@ -1659,8 +1662,7 @@ sub FetchMetaDataHelper {
   }
 
   # A nested hash used to match data requests with metadata
-  # Tied to Tie::RefHash::Nestable so that references can be keys
-  tie my %selectmatch, 'Tie::RefHash::Nestable';
+  my %selectmatch = ();
 
   # A nested hash of time extents for each NSLC request
   my %selectextent = ();
@@ -1712,33 +1714,40 @@ sub FetchMetaDataHelper {
 
     # Separate selections and exclusions.  The below voodoo:
     # split on | separator, select entries starting with/without - exclusion,
-    # and rebuild expression.  Finally, remove the - characters.
-    my $snetselect = join ('|', grep (!/^-/, split (/\|/,$snet)));
-    my $snetexclude = join ('|', grep (/^-/, split (/\|/,$snet)));
+    # wrap with ^$ terminators and rebuild expression.  Finally, remove the - characters.
+    my $snetselect = join ('|', map { qq/\^$_\$/ } grep (!/^-/, split (/\|/,$snet)));
+    my $snetexclude = join ('|', map { qq/\^$_\$/ } grep (/^-/, split (/\|/,$snet)));
     $snetexclude =~ s/\-//g;
 
-    my $sstaselect = join ('|', grep (!/^-/, split (/\|/,$ssta)));
-    my $sstaexclude = join ('|', grep (/^-/, split (/\|/,$ssta)));
+    my $sstaselect = join ('|', map { qq/\^$_\$/ } grep (!/^-/, split (/\|/,$ssta)));
+    my $sstaexclude = join ('|', map { qq/\^$_\$/ } grep (/^-/, split (/\|/,$ssta)));
     $sstaexclude =~ s/\-//g;
 
-    my $slocselect = join ('|', grep (!/^-/, split (/\|/,$sloc)));
-    my $slocexclude = join ('|', grep (/^-/, split (/\|/,$sloc)));
+    my $slocselect = join ('|', map { qq/\^$_\$/ } grep (!/^-/, split (/\|/,$sloc)));
+    my $slocexclude = join ('|', map { qq/\^$_\$/ } grep (/^-/, split (/\|/,$sloc)));
     $slocexclude =~ s/\-//g;
 
-    my $schanselect = join ('|', grep (!/^-/, split (/\|/,$schan)));
-    my $schanexclude = join ('|', grep (/^-/, split (/\|/,$schan)));
+    my $schanselect = join ('|', map { qq/\^$_\$/ } grep (!/^-/, split (/\|/,$schan)));
+    my $schanexclude = join ('|', map { qq/\^$_\$/ } grep (/^-/, split (/\|/,$schan)));
     $schanexclude =~ s/\-//g;
 
-    # Compile regular expressions for faster comparison, store selections
-    # and exclusions in a hash for each level.
-    $snet = { 'select' => ($snetselect) ? qr/$snetselect/ : undef,
-              'exclude' => ($snetexclude) ? qr/$snetexclude/ : undef };
-    $ssta = { 'select' => ($sstaselect) ? qr/$sstaselect/ : undef,
-              'exclude' => ($sstaexclude) ? qr/$sstaexclude/ : undef };
-    $sloc = { 'select' => ($slocselect) ? qr/$slocselect/ : undef,
-              'exclude' => ($slocexclude) ? qr/$slocexclude/ : undef };
-    $schan = { 'select' => ($schanselect) ? qr/$schanselect/ : undef,
-               'exclude' => ($schanexclude) ? qr/$schanexclude/ : undef };
+    # Compile regular expressions for faster comparison.
+    # Selections and exclusions are combined into a single expression as needed.
+    if ( $snetexclude && $snetselect ) { $snet = qr/(?!(${snetexclude}))(?=(${snetselect}))/ }
+    elsif ( $snetexclude ) { $snet = qr/(?!(${snetexclude}))/ }
+    else { $snet = qr/(${snetselect})/ }
+
+    if ( $sstaexclude && $sstaselect ) { $ssta = qr/(?!(${sstaexclude}))(?=(${sstaselect}))/ }
+    elsif ( $sstaexclude ) { $ssta = qr/(?!(${sstaexclude}))/ }
+    else { $ssta = qr/(${sstaselect})/ }
+
+    if ( $slocexclude && $slocselect ) { $sloc = qr/(?!(${slocexclude}))(?=(${slocselect}))/ }
+    elsif ( $slocexclude ) { $sloc = qr/(?!(${slocexclude}))/ }
+    else { $sloc = qr/(${slocselect})/ }
+
+    if ( $schanexclude && $schanselect ) { $schan = qr/(?!(${schanexclude}))(?=(${schanselect}))/ }
+    elsif ( $schanexclude ) { $schan = qr/(?!(${schanexclude}))/ }
+    else { $schan = qr/(${schanselect})/ }
 
     # Add entry to selection matching hash, using hashes of regexes as keys
     $selectmatch{$snet}{$ssta}{$sloc}{$schan}{"$kstart|$kend"} = "$sstart|$send";
@@ -1842,20 +1851,16 @@ sub FetchMetaDataHelper {
 
     # Match metadata to selections (requests) using nested hash of (compiled) regexes
     foreach my $knet ( keys %selectmatch ) {
-      next if ( defined $knet->{select} && $mnet !~ /^$knet->{select}$/ );
-      next if ( defined $knet->{exclude} && $mnet =~ /^$knet->{exclude}$/ );
+      next if ( $mnet !~ $knet );
 
       foreach my $ksta ( keys %{$selectmatch{$knet}} ) {
-	next if ( defined $ksta->{select} && $msta !~ /^$ksta->{select}$/ );
-	next if ( defined $ksta->{exclude} && $msta =~ /^$ksta->{exclude}$/ );
+	next if ( $msta !~ $ksta );
 
 	foreach my $kloc ( keys %{$selectmatch{$knet}{$ksta}} ) {
-	  next if ( defined $kloc->{select} && $mloc !~ /^$kloc->{select}$/ );
-          next if ( defined $kloc->{exclude} && $mloc =~ /^$kloc->{exclude}$/ );
+	  next if ( $mloc !~ $kloc );
 
           foreach my $kchan ( keys %{$selectmatch{$knet}{$ksta}{$kloc}} ) {
-	    next if ( defined $kchan->{select} && $mchan !~ /^$kchan->{select}$/ );
-	    next if ( defined $kchan->{exclude} && $mchan =~ /^$kchan->{exclude}$/ );
+            next if ( $mchan !~ $kchan );
 
 	    # Check for time overlap (intersection) with metadata
 	    foreach my $timekey ( keys %{$selectmatch{$knet}{$ksta}{$kloc}{$kchan}} ) {
