@@ -693,7 +693,6 @@ foreach my $dckey ( sort keys %datacenter ) {
       # Determine output file mode (overwrite or append) and add data center prefix if needed
       my $outfilemode = ( defined $outfileapp ) ? ">>" : ">";
       my $outfilename = $outfile;
-#      $outfilename = "$dckey-$outfile" if ( ! defined $outfileapp && $dckey );
       if ( ! defined $outfileapp && $dckey ) {
         # Add data center identifier, $dckey, to the beginning of the file name
         my ($volume,$directories,$file) = File::Spec->splitpath ($outfilename);
@@ -710,7 +709,7 @@ foreach my $dckey ( sort keys %datacenter ) {
       print STDERR "Cannot fetch SAC PZs, no SACPZ service available for data center $dckey\n";
     }
     else {
-      my $dcsacpzdir = ( $dckey ) ? "$sacpzdir/$dckey" : $sacpzdir;
+      my $dcsacpzdir = ( $dckey ) ? File::Spec->catdir ($sacpzdir,$dckey) : $sacpzdir;
 
       if ( ! -d "$dcsacpzdir" ) {
 	mkdir ($dcsacpzdir, 0755) || die "Cannot create directory $dcsacpzdir: $!\n";
@@ -726,7 +725,7 @@ foreach my $dckey ( sort keys %datacenter ) {
       print STDERR "Cannot fetch RESP, no RESP service available for data center $dckey\n";
     }
     else {
-      my $dcrespdir = ( $dckey ) ? "$respdir/$dckey" : $respdir;
+      my $dcrespdir = ( $dckey ) ? File::Spec->catdir ($respdir,$dckey) : $respdir;
 
       if ( ! -d "$dcrespdir" ) {
 	mkdir ($dcrespdir, 0755) || die "Cannot create directory $dcrespdir: $!\n";
@@ -745,7 +744,12 @@ foreach my $dckey ( sort keys %datacenter ) {
       # Open metadata file, appending if requested, adding data center prefix if needed
       my $mode = ( defined $metafileapp ) ? ">>" : ">";
       my $metafilename = $metafile;
-      $metafilename = "$dckey-$metafile" if ( ! defined $metafileapp && $dckey );
+      if ( ! defined $metafileapp && $dckey ) {
+        # Add data center identifier, $dckey, to the beginning of the file name
+        my ($volume,$directories,$file) = File::Spec->splitpath ($metafilename);
+        $metafilename = File::Spec->catfile ($directories, "$dckey-$file");
+      }
+
       open (META, $mode, $metafilename) || die "Cannot open metadata file '$metafilename': $!\n";
 
       printf STDERR "Writing metadata (%d channel epochs) to file: %s\n",
