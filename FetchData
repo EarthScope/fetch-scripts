@@ -75,7 +75,7 @@
 #
 # RESP: If the -rd option is given SEED RESP (as used by evalresp)
 # will be fetched and a file for each channel will be written to the
-# specified directory with the name 'RESP.Net.Sta.Loc.Chan'.  If this
+#specified directory with the name 'RESP.Net.Sta.Loc.Chan'.  If this
 # option is used while fetching waveform data, only channels which
 # returned waveforms will be requested.
 #
@@ -258,10 +258,19 @@
 #  - Optimize the matching of metadata to requests by avoiding Tie'd hashes and
 #  combining regular expressions for fewer match executions.
 #
+# 2016.260:
+#  - When writing separate output files per data center, append data center ID
+#  to the file name portion of the specified path instead of just the beginning.
+#  - Only do 2 retries for time series requests when Federating.
+#  - Add warnings when using minimum segment length and longest segment only
+#  options when Federating, many data centers do no support these leading to
+#  sometimes cryptic errors.
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
 use File::Basename;
+use File::Spec;
 use Getopt::Long;
 use LWP 5.806; # Require minimum version
 use LWP::UserAgent;
@@ -269,7 +278,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2016.089";
+my $version = "2016.260";
 
 my $scriptname = basename($0);
 
@@ -344,6 +353,7 @@ my $metafile   = undef;
 my $metafileapp= undef;
 my $nometadata = undef;
 my $noretry    = undef;
+my $retries    = 10;
 my $federate   = undef;
 my $exitvalue  = 0;
 
@@ -593,6 +603,16 @@ $nometadata = undef if ( $metafile || $sacpzdir || $respdir
 
 # Resolve federated requests
 if ( $federate ) {
+  # Set number of time series request retries to 2
+  $retries = 2;
+
+  # Print warnings for options not commonly supported
+  if ( $mslopt ) {
+    print STDERR "WARNING: Minimum segment length (-msl) option is not broadly supported by data centers\n"
+  }
+  if ( $lsoopt ) {
+    print STDERR "WARNING: Longest segment only (-lso) option is not broadly supported by data centers\n"
+  }
 
   &FederateRequest( $fedcatservice, \@selections );
 
@@ -673,7 +693,12 @@ foreach my $dckey ( sort keys %datacenter ) {
       # Determine output file mode (overwrite or append) and add data center prefix if needed
       my $outfilemode = ( defined $outfileapp ) ? ">>" : ">";
       my $outfilename = $outfile;
-      $outfilename = "$dckey-$outfile" if ( ! defined $outfileapp && $dckey );
+#      $outfilename = "$dckey-$outfile" if ( ! defined $outfileapp && $dckey );
+      if ( ! defined $outfileapp && $dckey ) {
+        # Add data center identifier, $dckey, to the beginning of the file name
+        my ($volume,$directories,$file) = File::Spec->splitpath ($outfilename);
+        $outfilename = File::Spec->catfile ($directories, "$dckey-$file");
+      }
 
       &FetchTimeSeriesData( $dckey, $outfilename, $outfilemode ) if ( $outfile );
     }
@@ -1147,7 +1172,7 @@ sub FederateRequest {
 #
 # The request list is separatated into groups where the group size is
 # defined in terms of station-days.  If the request for a group fails
-# it will be retried, after too many failures.
+# it will be retried, after too many failures we give up.
 #
 ######################################################################
 sub FetchTimeSeriesData {
@@ -1281,8 +1306,8 @@ sub FetchTimeSeriesData {
       seek (OUT, $outoffset, 0) if ( $outfile ne "-" );
 
       # Retry in 10 seconds or give up if already tried 10 times.
-      if ( $fetchcnt < 10 ) {
-	print STDERR "Retrying request in 10 seconds\n";
+      if ( $fetchcnt < $retries ) {
+	print STDERR "Retrying request in 10 seconds ($fetchcnt of $retries retries)\n";
 	sleep 10;
 	$fetchcnt++;
 	goto REDOGROUP;
