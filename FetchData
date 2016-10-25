@@ -266,6 +266,10 @@
 #  options when Federating, many data centers do no support these leading to
 #  sometimes cryptic errors.
 #
+# 2016.299:
+#   - Fix appending of data center ID to output file names when
+#   directories are not specified.
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -278,7 +282,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes;
 
-my $version = "2016.260";
+my $version = "2016.299";
 
 my $scriptname = basename($0);
 
@@ -696,7 +700,13 @@ foreach my $dckey ( sort keys %datacenter ) {
       if ( ! defined $outfileapp && $dckey ) {
         # Add data center identifier, $dckey, to the beginning of the file name
         my ($volume,$directories,$file) = File::Spec->splitpath ($outfilename);
-        $outfilename = File::Spec->catfile ($directories, "$dckey-$file");
+
+        if ( $directories ) {
+          $outfilename = File::Spec->catfile ($directories, "$dckey-$file");
+        }
+        else {
+          $outfilename = "$dckey-$file";
+        }
       }
 
       &FetchTimeSeriesData( $dckey, $outfilename, $outfilemode ) if ( $outfile );
@@ -747,7 +757,13 @@ foreach my $dckey ( sort keys %datacenter ) {
       if ( ! defined $metafileapp && $dckey ) {
         # Add data center identifier, $dckey, to the beginning of the file name
         my ($volume,$directories,$file) = File::Spec->splitpath ($metafilename);
-        $metafilename = File::Spec->catfile ($directories, "$dckey-$file");
+
+        if ( $directories ) {
+          $metafilename = File::Spec->catfile ($directories, "$dckey-$file");
+        }
+        else {
+          $metafilename = "$dckey-$file";
+        }
       }
 
       open (META, $mode, $metafilename) || die "Cannot open metadata file '$metafilename': $!\n";
