@@ -270,6 +270,11 @@
 #   - Fix appending of data center ID to output file names when
 #   directories are not specified.
 #
+# 2017.017:
+#   - Add a minimum request interval and use it to throttle web service request
+#   loops to avoid generating requests too fast.  At 50 milliseconds the throttling
+#   will not engage for the vast majority of users and uses.
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -280,9 +285,9 @@ use LWP 5.806; # Require minimum version
 use LWP::UserAgent;
 use HTTP::Status qw(status_message);
 use HTTP::Date;
-use Time::HiRes;
+use Time::HiRes qw(nanosleep);
 
-my $version = "2016.299";
+my $version = "2017.017";
 
 my $scriptname = basename($0);
 
@@ -328,6 +333,11 @@ my $useragent = "$scriptname/$version Perl/$] " . new LWP::UserAgent->_agent;
 
 # Waveform data request group size in terms of station-days
 my $groupstadays = 30;
+
+# A minimum time interval (seconds) for web service requests
+# This is used to avoid sending requests too quickly
+my $minimumrequestinterval = 0.05;
+
 
 my $usage      = undef;
 my $verbose    = 0;
@@ -1256,6 +1266,7 @@ sub FetchTimeSeriesData {
   print STDERR "Fetching time series data ($count selections)\n" if ( $verbose >= 1 );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
+  my $requestfinish = undef;
 
   # Request each data group
   my $groupnum = 1;
@@ -1278,6 +1289,12 @@ sub FetchTimeSeriesData {
       $postdata .= "$req\n";
     }
 
+    # Impose the minimum request interval, potentially throttling loop
+    if (defined $requestfinish && (Time::HiRes::time - $requestfinish) < $minimumrequestinterval) {
+      my $remaining = $minimumrequestinterval - (Time::HiRes::time - $requestfinish);
+      nanosleep ($remaining * 1E9) if ( $remaining > 0 );
+    }
+
     print STDERR "Time series URI: '$uri'\n" if ( $verbose > 1 );
     print STDERR "Data selection (POST):\n$postdata" if ( $verbose > 1 );
 
@@ -1291,6 +1308,8 @@ sub FetchTimeSeriesData {
 
     # Fetch time series data from web service using callback routine
     my $response = $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack_NoGZIP );
+
+    $requestfinish = Time::HiRes::time;
 
     if ( $response->code == 204 ) {
       print (STDERR "No data available\n") if ( $verbose >= 1 );
@@ -1384,6 +1403,7 @@ sub FetchSACPZ {
   print STDERR "Fetching SAC Poles and Zeros, writing to '$dcdir'\n" if ( $verbose >= 1 );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
+  my $requestfinish = undef;
 
   foreach my $req ( sort keys %{$datacenter{$dckey}{metarequest}} ) {
     # Skip entries with values not defined, perhaps no data was fetched
@@ -1410,6 +1430,12 @@ sub FetchSACPZ {
     $uri .= "&starttime=$rstart" if ( $rstart );
     $uri .= "&endtime=$rend" if ( $rend );
 
+    # Impose the minimum request interval, potentially throttling loop
+    if (defined $requestfinish && (Time::HiRes::time - $requestfinish) < $minimumrequestinterval) {
+      my $remaining = $minimumrequestinterval - (Time::HiRes::time - $requestfinish);
+      nanosleep ($remaining * 1E9) if ( $remaining > 0 );
+    }
+
     print STDERR "SAC-PZ URI: '$uri'\n" if ( $verbose > 1 );
 
     print STDERR "Downloading $sacpzfile ($count/$total) :: " if ( $verbose >= 1 );
@@ -1420,6 +1446,8 @@ sub FetchSACPZ {
     my $response = ( $inflater ) ?
       $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&DLCallBack_GZIP ) :
       $ua->get($uri, ':content_cb' => \&DLCallBack_NoGZIP );
+
+    $requestfinish = Time::HiRes::time;
 
     $inflater->inflateReset if ( $inflater );
 
@@ -1479,6 +1507,7 @@ sub FetchRESP {
   print STDERR "Fetching RESP, writing to '$dcdir'\n" if ( $verbose >= 1 );
   my $ftime = Time::HiRes::time;
   my $totalbytes = 0;
+  my $requestfinish = undef;
 
   foreach my $req ( sort keys %{$datacenter{$dckey}{metarequest}} ) {
     # Skip entries with values not defined, perhaps no data was fetched
@@ -1508,6 +1537,12 @@ sub FetchRESP {
     $uri .= "&starttime=$rstart" if ( $rstart );
     $uri .= "&endtime=$rend" if ( $rend );
 
+    # Impose the minimum request interval, potentially throttling loop
+    if (defined $requestfinish && (Time::HiRes::time - $requestfinish) < $minimumrequestinterval) {
+      my $remaining = $minimumrequestinterval - (Time::HiRes::time - $requestfinish);
+      nanosleep ($remaining * 1E9) if ( $remaining > 0 );
+    }
+
     print STDERR "RESP URI: '$uri'\n" if ( $verbose > 1 );
 
     print STDERR "Downloading $respfile ($count/$total) :: " if ( $verbose >= 1 );
@@ -1518,6 +1553,8 @@ sub FetchRESP {
     my $response = ( $inflater ) ?
       $ua->get($uri, 'Accept-Encoding' => 'gzip', ':content_cb' => \&DLCallBack_GZIP ) :
       $ua->get($uri, ':content_cb' => \&DLCallBack_NoGZIP );
+
+    $requestfinish = Time::HiRes::time;
 
     $inflater->inflateReset if ( $inflater );
 
