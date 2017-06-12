@@ -390,46 +390,47 @@ if ( eval("use Compress::Raw::Zlib; 1") ) {
 
 # Parse command line arguments
 Getopt::Long::Configure ("bundling_override");
-my $getoptsret = GetOptions ( 'help|usage|h'   => \$usage,
-                              'verbose|v+'     => \$verbose,
-                              'quiet|q'        => sub { $verbose = -1; },
-                              'nobs'           => \$nobsprint,
-                              'nometadata|nm'  => \$nometadata,
-                              'noretry|nr'     => \$noretry,
-                              'federate|F'     => \$federate,
-                              'net|N=s'        => \$net,
-                              'sta|S=s'        => \$sta,
-                              'loc|L=s'        => \$loc,
-                              'chan|C=s'       => \$chan,
-                              'qual|Q=s'       => \$qual,
-			      'starttime|s=s'  => \$starttime,
-			      'endtime|e=s'    => \$endtime,
-			      'lat=s'          => \@latrange,
-			      'lon=s'          => \@lonrange,
-			      'radius=s'       => \@degrange,
-			      'selectfile|l=s' => \$selectfile,
-			      'bfastfile|b=s'  => \$bfastfile,
-			      'msl=s'          => \$mslopt,
-			      'lso'            => \$lsoopt,
-			      'appname|A=s'    => \$appname,
-			      'auth|a=s'       => \$auth,
-			      'outfile|o=s'    => \$outfile,
-			      'outfileapp|O=s' => \$outfileapp,
-			      'sacpzdir|sd=s'  => \$sacpzdir,
-			      'respdir|rd=s'   => \$respdir,
-			      'metafile|m=s'   => \$metafile,
-			      'metafileapp|M=s'=> \$metafileapp,
-			      'timeseriesws=s' => \$timeseriesservice,
-			      'metadataws=s'   => \$metadataservice,
-			      'sacpzws=s'      => \$sacpzservice,
-			      'respws=s'       => \$respservice,
-			    );
+my $getoptsret = GetOptions(
+    'help|usage|h'    => \$usage,
+    'verbose|v+'      => \$verbose,
+    'quiet|q'         => sub { $verbose = -1; },
+    'nobs'            => \$nobsprint,
+    'nometadata|nm'   => \$nometadata,
+    'noretry|nr'      => \$noretry,
+    'federate|F'      => \$federate,
+    'net|N=s'         => \$net,
+    'sta|S=s'         => \$sta,
+    'loc|L=s'         => \$loc,
+    'chan|C=s'        => \$chan,
+    'qual|Q=s'        => \$qual,
+    'starttime|s=s'   => \$starttime,
+    'endtime|e=s'     => \$endtime,
+    'lat=s'           => \@latrange,
+    'lon=s'           => \@lonrange,
+    'radius=s'        => \@degrange,
+    'selectfile|l=s'  => \$selectfile,
+    'bfastfile|b=s'   => \$bfastfile,
+    'msl=s'           => \$mslopt,
+    'lso'             => \$lsoopt,
+    'appname|A=s'     => \$appname,
+    'auth|a=s'        => \$auth,
+    'outfile|o=s'     => \$outfile,
+    'outfileapp|O=s'  => \$outfileapp,
+    'sacpzdir|sd=s'   => \$sacpzdir,
+    'respdir|rd=s'    => \$respdir,
+    'metafile|m=s'    => \$metafile,
+    'metafileapp|M=s' => \$metafileapp,
+    'timeseriesws=s'  => \$timeseriesservice,
+    'metadataws=s'    => \$metadataservice,
+    'sacpzws=s'       => \$sacpzservice,
+    'respws=s'        => \$respservice,
+);
 
-my $required =  ( defined $net || defined $sta ||
-		  defined $loc || defined $chan ||
-		  scalar @latrange || scalar @lonrange || scalar @degrange ||
-		  defined $starttime || defined $endtime ||
-		  defined $selectfile || defined $bfastfile );
+my $required = (defined $net || defined $sta ||
+                defined $loc || defined $chan ||
+                scalar @latrange || scalar @lonrange || scalar @degrange ||
+                defined $starttime || defined $endtime ||
+                defined $selectfile || defined $bfastfile );
 
 if ( ! $getoptsret || $usage || ! $required ) {
   print "$scriptname: collect time series and related metadata (version $version)\n";
@@ -513,7 +514,7 @@ if ( $respdir && ! -d "$respdir" ) {
 
 # Check for time window if requesting time series data
 if ( $outfile && ( ! defined $selectfile && ! defined $bfastfile &&
-		   ( ! defined $starttime || ! defined $endtime ) ) ) {
+     ( ! defined $starttime || ! defined $endtime ) ) ) {
   die "Cannot request time series data without start and end times\n";
 }
 
@@ -772,7 +773,7 @@ foreach my $dckey ( sort keys %datacenter ) {
       my $dcsacpzdir = ( $dckey ) ? File::Spec->catdir ($sacpzdir,$dckey) : $sacpzdir;
 
       if ( ! -d "$dcsacpzdir" ) {
-	mkdir ($dcsacpzdir, 0755) || die "Cannot create directory $dcsacpzdir: $!\n";
+        mkdir ($dcsacpzdir, 0755) || die "Cannot create directory $dcsacpzdir: $!\n";
       }
 
       &FetchSACPZ( $dckey, $dcsacpzdir );
@@ -788,7 +789,7 @@ foreach my $dckey ( sort keys %datacenter ) {
       my $dcrespdir = ( $dckey ) ? File::Spec->catdir ($respdir,$dckey) : $respdir;
 
       if ( ! -d "$dcrespdir" ) {
-	mkdir ($dcrespdir, 0755) || die "Cannot create directory $dcrespdir: $!\n";
+        mkdir ($dcrespdir, 0755) || die "Cannot create directory $dcrespdir: $!\n";
       }
 
       &FetchRESP( $dckey, $dcrespdir );
@@ -819,7 +820,7 @@ foreach my $dckey ( sort keys %datacenter ) {
       open (META, $mode, $metafilename) || die "Cannot open metadata file '$metafilename': $!\n";
 
       printf STDERR "Writing metadata (%d channel epochs) to file: %s\n",
-	scalar @{$datacenter{$dckey}{metadata}}, $metafilename if ( $verbose >= 0 );
+      scalar @{$datacenter{$dckey}{metadata}}, $metafilename if ( $verbose >= 0 );
 
       # Print data center identifier
       printf META "#$dckey: %s\n", $datacenter{$dckey}{website} if ( $dckey );
@@ -828,13 +829,13 @@ foreach my $dckey ( sort keys %datacenter ) {
       print META "#net|sta|loc|chan|lat|lon|elev|depth|azimuth|dip|instrument|scale|scalefreq|scaleunits|samplerate|start|end\n";
 
       foreach my $channel ( sort @{$datacenter{$dckey}{metadata}} ) {
-	my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) =
-	  split (/\|/, $channel);
+        my ($net,$sta,$loc,$chan,$start,$end,$lat,$lon,$elev,$depth,$azimuth,$dip,$instrument,$samplerate,$sens,$sensfreq,$sensunit) =
+	        split (/\|/, $channel);
 
-	$sensfreq = sprintf ("%0g", $sensfreq);
-	$samplerate = sprintf ("%0g", $samplerate);
+        $sensfreq = sprintf ("%0g", $sensfreq);
+        $samplerate = sprintf ("%0g", $samplerate);
 
-	print META "$net|$sta|$loc|$chan|$lat|$lon|$elev|$depth|$azimuth|$dip|$instrument|$sens|$sensfreq|$sensunit|$samplerate|$start|$end\n";
+        print META "$net|$sta|$loc|$chan|$lat|$lon|$elev|$depth|$azimuth|$dip|$instrument|$sens|$sensfreq|$sensunit|$samplerate|$start|$end\n";
       }
 
       close META;
@@ -843,7 +844,8 @@ foreach my $dckey ( sort keys %datacenter ) {
 } # Done looping through data centers
 
 my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
-printf (STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n", $year+1900, $mon+1, $mday, $hour, $min, $sec) if ( $verbose >= 0 );
+printf (STDERR "DONE at %4d-%02d-%02d %02d:%02d:%02d\n",
+        $year+1900, $mon+1, $mday, $hour, $min, $sec) if ( $verbose >= 0 );
 
 exit $exitvalue;
 ## End of main
@@ -999,14 +1001,14 @@ sub ReadBFastFile {
 
     foreach my $chan ( @chans ) {
       if ( $chan !~ /^[A-Za-z0-9*?]{1,3}$/ ) {
-	print "Unrecognized channel codes: '$chan', skipping line $linecount\n" if ( $verbose >= 1 );
-	next BFLINE;
+        print "Unrecognized channel codes: '$chan', skipping line $linecount\n" if ( $verbose >= 1 );
+        next BFLINE;
       }
     }
 
     if ( scalar @chans != $count ) {
       printf "Channel count field ($count) does not match number of channels specified (%d), skipping line $linecount\n",
-	scalar @chans if ( $verbose >= 1 );
+      scalar @chans if ( $verbose >= 1 );
       next;
     }
 
@@ -1162,70 +1164,70 @@ sub FederateRequest {
     }
     elsif ( $stationws ) {
       if ( $dckey ) {
-	$stationws =~ s/\/$//; # Trim trailing slash
-	$datacenter{$dckey}{metadataws} = $stationws;
+        $stationws =~ s/\/$//; # Trim trailing slash
+        $datacenter{$dckey}{metadataws} = $stationws;
       }
       else {
-	print STDERR "Federation catalog service returned STATIONSERVICE without DATACENTER declared\n";
-	return undef;
+        print STDERR "Federation catalog service returned STATIONSERVICE without DATACENTER declared\n";
+        return undef;
       }
     }
     elsif ( $dataselectws ) {
       if ( $dckey ) {
-	$dataselectws =~ s/\/$//; # Trim trailing slash
-	$datacenter{$dckey}{timeseriesws} = $dataselectws;
+        $dataselectws =~ s/\/$//; # Trim trailing slash
+        $datacenter{$dckey}{timeseriesws} = $dataselectws;
       }
       else {
-	print STDERR "Federation catalog service returned DATASELECTSERVICE without DATACENTER declared\n";
-	return undef;
+        print STDERR "Federation catalog service returned DATASELECTSERVICE without DATACENTER declared\n";
+        return undef;
       }
     }
     elsif ( $sacpzws ) {
       if ( $dckey ) {
-	$sacpzws =~ s/\/$//; # Trim trailing slash
-	$datacenter{$dckey}{sacpzws} = $sacpzws;
+        $sacpzws =~ s/\/$//; # Trim trailing slash
+        $datacenter{$dckey}{sacpzws} = $sacpzws;
       }
       else {
-	print STDERR "Federation catalog service returned SACPZSERVICE without DATACENTER declared\n";
-	return undef;
+        print STDERR "Federation catalog service returned SACPZSERVICE without DATACENTER declared\n";
+        return undef;
       }
     }
     elsif ( $respws ) {
       if ( $dckey ) {
-	$respws =~ s/\/$//; # Trim trailing slash
-	$datacenter{$dckey}{respws} = $respws;
+        $respws =~ s/\/$//; # Trim trailing slash
+        $datacenter{$dckey}{respws} = $respws;
       }
       else {
-	print STDERR "Federation catalog service returned RESPSERVICE without DATACENTER declared\n";
-	return undef;
+        print STDERR "Federation catalog service returned RESPSERVICE without DATACENTER declared\n";
+        return undef;
       }
     }
     # Ignore any other service declarations
     elsif ( $line =~ /^.*SERVICE\=.+$/ )
       {
-	print STDERR "Unused service declaration: $line\n" if ( $verbose >= 2 );
+        print STDERR "Unused service declaration: $line\n" if ( $verbose >= 2 );
       }
     # Ignore key=value parameters
     elsif ( $line =~ /^[\-\.\w]+\=[\-\.\w]+$/ )
       {
-	print STDERR "Unused key=value: $line\n" if ( $verbose >= 2 );
+        print STDERR "Unused key=value: $line\n" if ( $verbose >= 2 );
       }
     # All other lines should be selection lines
     else {
       my ($net,$sta,$loc,$chan,$start,$end) = split (/\s+/, $line);
 
       if ( ! defined $end ) {
-	print STDERR "Federation catalog service returned unrecognized selection line:\n'$line'\n";
-	return undef;
+        print STDERR "Federation catalog service returned unrecognized selection line:\n'$line'\n";
+        return undef;
       }
 
       # Add to data center selection list
       if ( $dckey ) {
-	push ( @{$datacenter{$dckey}{selection}}, "$net|$sta|$loc|$chan|$start|$end");
+        push ( @{$datacenter{$dckey}{selection}}, "$net|$sta|$loc|$chan|$start|$end");
       }
       else {
-	print STDERR "Federation catalog service returned selecion line without DATACENTER declared\n";
-	return undef;
+        print STDERR "Federation catalog service returned selecion line without DATACENTER declared\n";
+        return undef;
       }
     }
   } # Done parsing federator catalog response
@@ -1369,7 +1371,7 @@ sub FetchTimeSeriesData {
 	     . $response->code . " :: " . $response->message . "\n");
 
       if ( $response->code == 429 ) {
-	print STDERR "Usage has exceeded data center limit, try making fewer concurrent requests\n\n";
+        print STDERR "Usage has exceeded data center limit, try making fewer concurrent requests\n\n";
       }
 
       print STDERR "------\n" . $response->decoded_content . "\n------\n";
@@ -1386,14 +1388,14 @@ sub FetchTimeSeriesData {
 
       # Retry in 10 seconds or give up if already tried 10 times.
       if ( $fetchcnt < $retries ) {
-	print STDERR "Retrying request in 10 seconds ($fetchcnt of $retries retries)\n";
-	sleep 10;
-	$fetchcnt++;
-	goto REDOGROUP;
+        print STDERR "Retrying request in 10 seconds ($fetchcnt of $retries retries)\n";
+        sleep 10;
+        $fetchcnt++;
+        goto REDOGROUP;
       }
       else {
-	print STDERR "Too many retries, giving up.\n";
-	last;
+        print STDERR "Too many retries, giving up.\n";
+        last;
       }
     }
     else {
@@ -1812,12 +1814,12 @@ sub FetchMetaDataHelper {
       my ($estart,$eend,$ekstart,$ekend) = @{$selectextent{$snet}{$ssta}{$sloc}{$schan}};
 
       if ( ! defined $kstart || $kstart < $ekstart ) {
-	$ekstart = $kstart;
-	$estart = $pstart;
+        $ekstart = $kstart;
+        $estart = $pstart;
       }
       if ( ! defined $kend || $kend > $ekend ) {
-	$ekend = $kend;
-	$eend = $pend;
+        $ekend = $kend;
+        $eend = $pend;
       }
 
       $selectextent{$snet}{$ssta}{$sloc}{$schan} = [$estart,$eend,$ekstart,$ekend];
@@ -1879,11 +1881,11 @@ sub FetchMetaDataHelper {
   foreach my $net ( sort keys %selectextent ) {
     foreach my $sta ( sort keys %{$selectextent{$net}} ) {
       foreach my $loc ( sort keys %{$selectextent{$net}{$sta}} ) {
-	foreach my $chan ( sort keys %{$selectextent{$net}{$sta}{$loc}} ) {
+        foreach my $chan ( sort keys %{$selectextent{$net}{$sta}{$loc}} ) {
           my ($start,$end) = @{$selectextent{$net}{$sta}{$loc}{$chan}};
 
-	  $postdata .= "$net $sta $loc $chan $start $end\n";
-	}
+          $postdata .= "$net $sta $loc $chan $start $end\n";
+        }
       }
     }
   }
@@ -1953,7 +1955,7 @@ sub FetchMetaDataHelper {
     next if ( $line =~ /^#.*/ );  # Skip comment lines beginning with '#'
 
     my ($mnet,$msta,$mloc,$mchan,$mlat,$mlon,$melev,$mdepth,$mazimuth,$mdip,$minstrument,
-	$mscale,$mscalefreq,$mscaleunits,$msamplerate,$mstart,$mend) = split(/\|/, $line);
+        $mscale,$mscalefreq,$mscaleunits,$msamplerate,$mstart,$mend) = split(/\|/, $line);
 
     # Translate metadata location ID to "--" if it is spaces or empty
     $mloc = "--" if ( $mloc eq "  " || $mloc eq "" );
@@ -1976,49 +1978,49 @@ sub FetchMetaDataHelper {
       next if ( $mnet !~ $knet );
 
       foreach my $ksta ( keys %{$selectmatch{$knet}} ) {
-	next if ( $msta !~ $ksta );
+        next if ( $msta !~ $ksta );
 
-	foreach my $kloc ( keys %{$selectmatch{$knet}{$ksta}} ) {
-	  next if ( $mloc !~ $kloc );
+        foreach my $kloc ( keys %{$selectmatch{$knet}{$ksta}} ) {
+          next if ( $mloc !~ $kloc );
 
           foreach my $kchan ( keys %{$selectmatch{$knet}{$ksta}{$kloc}} ) {
             next if ( $mchan !~ $kchan );
 
-	    # Check for time overlap (intersection) with metadata
-	    foreach my $timekey ( keys %{$selectmatch{$knet}{$ksta}{$kloc}{$kchan}} ) {
-	      my ($kstart,$kend) = split (/\|/, $timekey);
+            # Check for time overlap (intersection) with metadata
+            foreach my $timekey ( keys %{$selectmatch{$knet}{$ksta}{$kloc}{$kchan}} ) {
+              my ($kstart,$kend) = split (/\|/, $timekey);
 
-	      # If time ranges intersect add to request hash, account for unspecified/undef time entries
-	      if ( ($cstart <= $kend || ! $kend) && ($cend >= $kstart || ! $kstart) ) {
-		my ($sstart,$send) = split (/\|/, $selectmatch{$knet}{$ksta}{$kloc}{$kchan}{$timekey});
+              # If time ranges intersect add to request hash, account for unspecified/undef time entries
+              if ( ($cstart <= $kend || ! $kend) && ($cend >= $kstart || ! $kstart) ) {
+                my ($sstart,$send) = split (/\|/, $selectmatch{$knet}{$ksta}{$kloc}{$kchan}{$timekey});
 
-		# Push channel epoch metadata into storage list
-		if ( ! $metadatalisted ) {
-		  push (@{$datacenter{$dckey}{metadata}},
-			"$mnet|$msta|$mloc|$mchan|$mstart|$mend|$mlat|$mlon|$melev|$mdepth|$mazimuth|$mdip|$minstrument|$msamplerate|$mscale|$mscalefreq|$mscaleunits");
-		  $metadatalisted = 1;
-		  $totalepochs++;
-		}
+                # Push channel epoch metadata into storage list
+                if ( ! $metadatalisted ) {
+                  push (@{$datacenter{$dckey}{metadata}},
+                        "$mnet|$msta|$mloc|$mchan|$mstart|$mend|$mlat|$mlon|$melev|$mdepth|$mazimuth|$mdip|$minstrument|$msamplerate|$mscale|$mscalefreq|$mscaleunits");
+                  $metadatalisted = 1;
+                  $totalepochs++;
+                }
 
-		# Add entry to request hash with value of matching metadata
-		$datacenter{$dckey}{request}->{"$mnet|$msta|$mloc|$mchan|$sstart|$send"} = "$mstart|$mend";
+                # Add entry to request hash with value of matching metadata
+                $datacenter{$dckey}{request}->{"$mnet|$msta|$mloc|$mchan|$sstart|$send"} = "$mstart|$mend";
 
-		# Track widest metadata range for NSLC for SACPZ and RESP requests
-		if ( ! exists $datacenter{$dckey}{metarequest}->{"$mnet|$msta|$mloc|$mchan"} ) {
-		  $datacenter{$dckey}{metarequest}->{"$mnet|$msta|$mloc|$mchan"} = "$cstart|$cend";
-		}
-		else {
-		  my ($vstart,$vend) = split (/\|/, $datacenter{$dckey}{metarequest}->{"$mnet|$msta|$mloc|$mchan"});
+                # Track widest metadata range for NSLC for SACPZ and RESP requests
+                if ( ! exists $datacenter{$dckey}{metarequest}->{"$mnet|$msta|$mloc|$mchan"} ) {
+                  $datacenter{$dckey}{metarequest}->{"$mnet|$msta|$mloc|$mchan"} = "$cstart|$cend";
+                }
+                else {
+                  my ($vstart,$vend) = split (/\|/, $datacenter{$dckey}{metarequest}->{"$mnet|$msta|$mloc|$mchan"});
 
-		  $vstart = $cstart if ( $cstart < $vstart );
-		  $vend = $cend if ( $cend > $vend );
+                  $vstart = $cstart if ( $cstart < $vstart );
+                  $vend = $cend if ( $cend > $vend );
 
-		  $datacenter{$dckey}{metarequest}->{"$mnet|$msta|$mloc|$mchan"} = "$vstart|$vend";
-		}
-	      }
-	    }
-	  }
-	}
+                  $datacenter{$dckey}{metarequest}->{"$mnet|$msta|$mloc|$mchan"} = "$vstart|$vend";
+                }
+              }
+            }
+          }
+        }
       }
     }
   } # End of looping through metadata results
