@@ -444,7 +444,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -C,--chan         Channel codes, list and wildcards (* and ?) accepted\n";
   print " -Q,--qual         Quality indicator, by default no quality is specified\n";
   print " -s starttime      Specify start time (YYYY-MM-DD,HH:MM:SS.ssssss)\n";
-  print " -e endtime        Specify end time (YYYY-MM-DD,HH:MM:SS.ssssss)\n";
+  print " -e endtime        Specify end time (YYYY-MM-DD,HH:MM:SS.ssssss or #[SMHD])\n";
   print " --lat min:max     Specify a minimum and/or maximum latitude range\n";
   print " --lon min:max     Specify a minimum and/or maximum longitude range\n";
   print " --radius lat:lon:maxradius[:minradius]\n";
@@ -525,9 +525,41 @@ if ( $starttime ) {
 }
 
 if ( $endtime ) {
-  my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $endtime);
-  $endtime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
-  $endtime .= ".$subsec" if ( $subsec );
+  # Check for and parse time in duration pattern: #.#[SMHD]
+  if ( $endtime =~ /^[\d\.]+[SsMmHhDd]?$/ ) {
+    if ( $starttime ) {
+      my ($offset, $timeunit) = $endtime =~ /^([\d\.]+)([SsMmHhDd]?)$/i;
+      $timeunit = 'S' if (! $timeunit);
+
+      # Convert offset value to seconds if specified as days, hours or minutes
+      if ($timeunit =~ /[Dd]/) {
+        $offset *= 86400;
+      }
+      elsif ($timeunit =~ /[Hh]/) {
+        $offset *= 3600;
+      }
+      elsif ($timeunit =~ /[Mm]/) {
+        $offset *= 60;
+      }
+
+      # Calculate end time from start + offset and generate string
+      my $rstartepoch = str2time ($starttime, "UTC");
+      if ( defined $rstartepoch ) {
+        $endtime = &mktimestring($rstartepoch + $offset, 1);
+      }
+      else {
+        die "Unable to parse start time: '$starttime'\n"
+      }
+    }
+    else {
+      die "Cannot specify end time as duration without specifying start time\n";
+    }
+  }
+  else {
+    my ($year,$month,$mday,$hour,$min,$sec,$subsec) = split (/[-:,.\s\/T]/, $endtime);
+    $endtime = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d", $year, $month, $mday, $hour, $min, $sec);
+    $endtime .= ".$subsec" if ( $subsec );
+  }
 }
 
 # Validate and prepare lat, lon and radius input
@@ -2025,23 +2057,41 @@ sub MDCallBack {
 
 
 ######################################################################
-# mktimestring (time):
+# mktimestring (time, [withSubSeconds, [withZSuffix]]):
 #
-# Return a time string in YYYY-MM-DDTHH:MM:SS format for the specified
-# time value.
+# Return a time string in YYYY-MM-DDTHH:MM:SS[.ssssss][Z] format
+# for the specified time value.
+#
+# If 'withSubSeconds' is true include microsecond resolution.
+# If 'withZSuffix' is true inlude a 'Z' TZ designator suffix.
 ######################################################################
 sub mktimestring {
   my $time = shift;
+  my $withSubSeconds = shift;
+  my $withZSuffix = shift;
 
   return undef if ( ! $time );
 
-  my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime ($time);
+  my ($sec,$min,$hour,$mday,$mon,$year) = gmtime ($time);
 
   $year += 1900;
   $mon += 1;
 
-  return sprintf ("%04d-%02d-%02dT%02d:%02d:%02d",
-		  $year,$mon,$mday,$hour,$min,$sec);
+  my $timestr = sprintf ("%04d-%02d-%02dT%02d:%02d:%02d",
+		                     $year,$mon,$mday,$hour,$min,$sec);
+
+  # Add subseconds at microsecond resolution if requested
+  if ( $withSubSeconds ) {
+    my $usec = int (($time - int $time) * 1000000.0 + 0.5);
+    $timestr .= sprintf (".%06d", $usec);
+  }
+
+  # Add 'Z' for denoting UTC time zone if requested
+  if ( $withZSuffix ) {
+    $timestr .= "Z";
+  }
+
+  return $timestr;
 }
 
 
