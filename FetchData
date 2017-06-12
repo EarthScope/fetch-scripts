@@ -275,6 +275,11 @@
 #   loops to avoid generating requests too fast.  At 50 milliseconds the throttling
 #   will not engage for the vast majority of users and uses.
 #
+# 2017.163:
+#  - Set $ENV{PERL_LWP_SSL_VERIFY_HOSTNAME} = 0 to allow usage with
+#    HTTPS endpoints without checking for a valid certificate matching
+#    the expected hostname.
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -287,7 +292,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes qw(nanosleep);
 
-my $version = "2017.017";
+my $version = "2017.163";
 
 my $scriptname = basename($0);
 
@@ -338,6 +343,9 @@ my $groupstadays = 30;
 # This is used to avoid sending requests too quickly
 my $minimumrequestinterval = 0.05;
 
+# Allow encrypted connections without checking for valid certificate matching
+# the expected hostname.
+$ENV{PERL_LWP_SSL_VERIFY_HOSTNAME} = 0;
 
 my $usage      = undef;
 my $verbose    = 0;
