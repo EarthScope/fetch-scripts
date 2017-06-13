@@ -275,12 +275,14 @@
 #   loops to avoid generating requests too fast.  At 50 milliseconds the throttling
 #   will not engage for the vast majority of users and uses.
 #
-# 2017.163:
+# 2017.164:
 #  - Set $ENV{PERL_LWP_SSL_VERIFY_HOSTNAME} = 0 to allow usage with
-#    HTTPS endpoints without checking for a valid certificate matching
-#    the expected hostname.
+#    HTTPS endpoints without peforming certificate verification.
 #  - Allow -e end time specification to be an offset relative to the
 #    start time in the pattern #.#[SMHD], e.g. 30m, 1h, 2D, etc.
+#  - Allow -F option to accept a list of data centers that is passed
+#    to the Federator to limit the response to specific centers.
+#    Centers: http://service.iris.edu/irisws/fedcatalog/1/datacenters
 #
 #  Author: Chad Trabant, IRIS Data Management Center
 
@@ -294,7 +296,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes qw(nanosleep);
 
-my $version = "2017.163";
+my $version = "2017.164";
 
 my $scriptname = basename($0);
 
@@ -330,7 +332,7 @@ my $respservice = "$servicebase/irisws/resp/1";
 $respservice = $ENV{'RESPWS'} if ( exists $ENV{'RESPWS'} );
 
 # Web service for federation catalog
-my $fedcatservice = "$servicebase/irisws/fedcatalog/1";
+my $fedcatservice = "$servicebase/iriswsbeta/fedcatalog/1";
 
 # Check for environment variable override for fedcatservice
 $fedcatservice = $ENV{'FEDCATWS'} if ( exists $ENV{'FEDCATWS'} );
@@ -393,39 +395,39 @@ if ( eval("use Compress::Raw::Zlib; 1") ) {
 # Parse command line arguments
 Getopt::Long::Configure ("bundling_override");
 my $getoptsret = GetOptions(
-    'help|usage|h'    => \$usage,
-    'verbose|v+'      => \$verbose,
-    'quiet|q'         => sub { $verbose = -1; },
-    'nobs'            => \$nobsprint,
-    'nometadata|nm'   => \$nometadata,
-    'noretry|nr'      => \$noretry,
-    'federate|F'      => \$federate,
-    'net|N=s'         => \$net,
-    'sta|S=s'         => \$sta,
-    'loc|L=s'         => \$loc,
-    'chan|C=s'        => \$chan,
-    'qual|Q=s'        => \$qual,
-    'starttime|s=s'   => \$starttime,
-    'endtime|e=s'     => \$endtime,
-    'lat=s'           => \@latrange,
-    'lon=s'           => \@lonrange,
-    'radius=s'        => \@degrange,
-    'selectfile|l=s'  => \$selectfile,
-    'bfastfile|b=s'   => \$bfastfile,
-    'msl=s'           => \$mslopt,
-    'lso'             => \$lsoopt,
-    'appname|A=s'     => \$appname,
-    'auth|a=s'        => \$auth,
-    'outfile|o=s'     => \$outfile,
-    'outfileapp|O=s'  => \$outfileapp,
-    'sacpzdir|sd=s'   => \$sacpzdir,
-    'respdir|rd=s'    => \$respdir,
-    'metafile|m=s'    => \$metafile,
-    'metafileapp|M=s' => \$metafileapp,
-    'timeseriesws=s'  => \$timeseriesservice,
-    'metadataws=s'    => \$metadataservice,
-    'sacpzws=s'       => \$sacpzservice,
-    'respws=s'        => \$respservice,
+    'help|usage|h+'    => \$usage,
+    'verbose|v+'       => \$verbose,
+    'quiet|q'          => sub { $verbose = -1; },
+    'nobs'             => \$nobsprint,
+    'nometadata|nm'    => \$nometadata,
+    'noretry|nr'       => \$noretry,
+    'federate|F:s'     => \$federate,
+    'net|N=s'          => \$net,
+    'sta|S=s'          => \$sta,
+    'loc|L=s'          => \$loc,
+    'chan|C=s'         => \$chan,
+    'qual|Q=s'         => \$qual,
+    'starttime|s=s'    => \$starttime,
+    'endtime|e=s'      => \$endtime,
+    'lat=s'            => \@latrange,
+    'lon=s'            => \@lonrange,
+    'radius=s'         => \@degrange,
+    'selectfile|l=s'   => \$selectfile,
+    'bfastfile|b=s'    => \$bfastfile,
+    'msl=s'            => \$mslopt,
+    'lso'              => \$lsoopt,
+    'appname|A=s'      => \$appname,
+    'auth|a=s'         => \$auth,
+    'outfile|o=s'      => \$outfile,
+    'outfileapp|O=s'   => \$outfileapp,
+    'sacpzdir|sd=s'    => \$sacpzdir,
+    'respdir|rd=s'     => \$respdir,
+    'metafile|m=s'     => \$metafile,
+    'metafileapp|M=s'  => \$metafileapp,
+    'timeseriesws=s'   => \$timeseriesservice,
+    'metadataws=s'     => \$metadataservice,
+    'sacpzws=s'        => \$sacpzservice,
+    'respws=s'         => \$respservice,
 );
 
 my $required = (defined $net || defined $sta ||
@@ -461,7 +463,8 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -A appname        Application/version string for identification\n";
   print " -a user:pass      User and password for access to restricted data\n";
   print "\n";
-  print " -F                Federate the request to multiple data centers if needed\n";
+  print " -F [DC1[,DC2]]    Federate the request to multiple data centers if needed\n";
+  print "                     Federation may be limited to an optional list of DCs\n";
   print "                     Output files are prefixed by data center identifiers\n";
   print "\n";
   print " -o outfile        Fetch time series data and write to output file\n";
@@ -659,7 +662,10 @@ $nometadata = undef if ( $metafile || $sacpzdir || $respdir
 			 || scalar @latrange || scalar @lonrange || scalar @degrange );
 
 # Resolve federated requests
-if ( $federate ) {
+if ( defined $federate ) {
+  # Translate negation specified as 'not' with the '-' needed by the service
+  $federate =~ s/not/\-/g;
+
   # Set number of time series request retries to 2
   $retries = 2;
 
@@ -1065,6 +1071,9 @@ sub FederateRequest {
   # Create POST data selection
   my $postdata = "";
 
+  if ( length($federate) > 0 ) {
+    $postdata .= "datacenter=$federate\n";
+  }
   if ( scalar @latrange ) {
     $postdata .= "minlatitude=$latrange[0]\n" if ( defined $latrange[0] );
     $postdata .= "maxlatitude=$latrange[1]\n" if ( defined $latrange[1] );
