@@ -492,7 +492,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
     print " -timeseriesws URL  (e.g. http://service.iris.edu/fdsnws/dataselect/1)\n";
     print " -metadataws URL  (e.g. http://service.iris.edu/fdsnws/station/1)\n";
     print " -respws URL  (e.g. http://service.iris.edu/irisws/resp/1)\n";
-    print " -respws URL  (e.g. http://service.iris.edu/irisws/sacpz/1/)\n";
+    print " -sacpzws URL  (e.g. http://service.iris.edu/irisws/sacpz/1/)\n";
     print "\n";
   }
 
