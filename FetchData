@@ -287,6 +287,9 @@
 #    Relegate lesser used options to the extended help and add more details
 #    of federation usage and specification of alternate WS endpoints.
 #
+# 2018.337:
+#  - Add -X option to download metadata as StationXML at response level.
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -299,7 +302,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes qw(nanosleep);
 
-my $version = "2017.164";
+my $version = "2018.337";
 
 my $scriptname = basename($0);
 
@@ -381,6 +384,7 @@ my $respdir    = undef;
 my $metafile   = undef;
 my $metafileapp= undef;
 my $nometadata = undef;
+my $sxmlfile   = undef;
 my $noretry    = undef;
 my $retries    = 10;
 my $federate   = undef;
@@ -427,6 +431,7 @@ my $getoptsret = GetOptions(
     'respdir|rd=s'     => \$respdir,
     'metafile|m=s'     => \$metafile,
     'metafileapp|M=s'  => \$metafileapp,
+    'sxmlfile|X=s'     => \$sxmlfile,
     'timeseriesws=s'   => \$timeseriesservice,
     'metadataws=s'     => \$metadataservice,
     'sacpzws=s'        => \$sacpzservice,
@@ -470,6 +475,7 @@ if ( ! $getoptsret || $usage || ! $required ) {
   print " -sd sacpzdir      Fetch SAC P&Zs and write files to sacpzdir\n";
   print " -rd respdir       Fetch RESP and write files to respdir\n";
   print " -m metafile       Write basic metadata to specified file\n";
+  print " -X SXMLfile       Write response-level StationXML to specified file\n";
   print "\n";
 
   if ( $usage >= 2 ) {
@@ -521,7 +527,7 @@ if ( $metafileapp ) {
   $metafile = $metafileapp;
 }
 
-if ( ! $outfile && ! $metafile && ! $sacpzdir && ! $respdir ) {
+if ( ! $outfile && ! $metafile && ! $sxmlfile && ! $sacpzdir && ! $respdir ) {
   die "No output options specified, try -h for usage information\n";
 }
 
@@ -680,7 +686,7 @@ my $datasize = 0;
 # Fetch metadata from the station web service by default unless the nometadata option
 # is specified or if metadata output file has been requested or if geographic range
 # selection is requested.
-$nometadata = undef if ( $metafile || $sacpzdir || $respdir
+$nometadata = undef if ( $metafile || $sxmlfile || $sacpzdir || $respdir
 			 || scalar @latrange || scalar @lonrange || scalar @degrange );
 
 # Resolve federated requests
@@ -823,6 +829,30 @@ foreach my $dckey ( sort keys %datacenter ) {
       }
 
       &FetchRESP( $dckey, $dcrespdir );
+    }
+  }
+
+  # Collect StationXML
+  if ( $sxmlfile ) {
+    if ( ! exists $datacenter{$dckey}{metadataws} ) {
+      print STDERR "Cannot fetch StationXML, no metadata service available for data center $dckey\n";
+    }
+    else {
+      my $dcsxmlfile = $sxmlfile;
+
+      if ( $dckey ) {
+        # Add data center identifier, $dckey, to the beginning of the file name
+        my ($volume,$directories,$file) = File::Spec->splitpath ($sxmlfile);
+
+        if ( $directories ) {
+          $dcsxmlfile = File::Spec->catfile ($directories, "$dckey-$file");
+        }
+        else {
+          $dcsxmlfile = "$dckey-$file";
+        }
+      }
+
+      &FetchStationXML( $dckey, $dcsxmlfile );
     }
   }
 
@@ -1664,6 +1694,90 @@ sub FetchRESP {
 
 } # End of FetchRESP
 
+
+######################################################################
+# FetchStationXML:
+#
+# Fetch StationXML for each entry in the %metarequest hash with a value
+# of 1.  The result for each channel is written to the specified file.
+#
+######################################################################
+sub FetchStationXML {
+  my $dckey = shift;
+  my $dcsxmlfile = shift;
+
+  # Create HTTP user agent
+  my $ua = RequestAgent->new();
+  $ua->env_proxy;
+
+  # Create web service URI
+  my $uri = $datacenter{$dckey}{metadataws} . "/query";
+
+  # Create POST data selection: specify options followed by selections
+  my $postdata = "level=response\n";
+  $postdata .= "format=xml\n";
+
+  foreach my $req ( sort keys %{$datacenter{$dckey}{metarequest}} ) {
+    # Skip entries with values not defined, perhaps no data was fetched
+    next if ( ! defined $datacenter{$dckey}{metarequest}->{$req} );
+
+    my ($rnet,$rsta,$rloc,$rchan) = split (/\|/, $req);
+    my ($mstart,$mend) = split (/\|/, $datacenter{$dckey}{metarequest}->{$req});
+
+    # Create time strings for request, shrink window by one second to avoid
+    # matching too many metadata ranges by avoiding the boundary.
+    my $rstart = &mktimestring ($mstart + 1);
+    my $rend = &mktimestring ($mend - 1);
+
+    $postdata .= "$rnet $rsta $rloc $rchan $rstart $rend\n";
+  }
+
+  if ( ! open (OUT, ">$dcsxmlfile") ) {
+    print STDERR "Cannot open output file '$dcsxmlfile': $!\n";
+    return;
+  }
+
+  print STDERR "StationXML URI: '$uri'\n" if ( $verbose >= 2 );
+  print STDERR "StationXML selection (POST):\n$postdata" if ( $verbose > 1 );
+
+  print STDERR "Fetching StationXML ($dcsxmlfile) :: " if ( $verbose >= 1 );
+  my $ftime = Time::HiRes::time;
+
+  $datasize = 0;
+
+  # Fetch StationXML from web service using callback routine
+  my $response = ( $inflater ) ?
+    $ua->post($uri, 'Accept-Encoding' => 'gzip', Content => $postdata, ':content_cb' => \&DLCallBack_GZIP ) :
+    $ua->post($uri, Content => $postdata, ':content_cb' => \&DLCallBack_NoGZIP );
+
+  $inflater->inflateReset if ( $inflater );
+
+  if ( $response->code == 404 || $response->code == 204 ) {
+    print (STDERR "No StationXML available\n") if ( $verbose >= 1 );
+  }
+  elsif ( ! $response->is_success() ) {
+    print (STDERR "Error fetching StationXML: "
+	   . $response->code . " :: " . status_message($response->code) . "\n");
+    print STDERR "------\n" . $response->decoded_content . "\n------\n";
+    print STDERR "  URI: '$uri'\n" if ( $verbose >= 2 );
+
+    $exitvalue = 1;
+  }
+  else {
+    printf (STDERR "%s\n", ($nobsprint)?sizestring($datasize):"") if ( $verbose >= 1 );
+  }
+
+  my $duration = Time::HiRes::time - $ftime;
+  my $rate = $datasize/(($duration)?$duration:0.000001);
+  printf (STDERR "Received %s of StationXML in %.1f seconds (%s/s)\n",
+	  sizestring($datasize), $duration, sizestring($rate)) if ( $verbose >= 0 );
+
+  close OUT;
+
+  # Remove file if no data was fetched
+  unlink $dcsxmlfile if ( $datasize == 0 );
+
+} # End of FetchStationXML
 
 ######################################################################
 # DLCallBack_NoGZIP:
