@@ -290,6 +290,9 @@
 # 2018.337:
 #  - Add -X option to download metadata as StationXML at response level.
 #
+# 2020.314:
+#  - Add explicit test for no requests after discovery and skip data center if needed.
+#
 #  Author: Chad Trabant, IRIS Data Management Center
 
 use strict;
@@ -302,7 +305,7 @@ use HTTP::Status qw(status_message);
 use HTTP::Date;
 use Time::HiRes qw(nanosleep);
 
-my $version = "2018.337";
+my $version = "2020.314";
 
 my $scriptname = basename($0);
 
@@ -767,12 +770,29 @@ foreach my $dckey ( sort keys %datacenter ) {
     }
   }
 
-  # Report complete data request
+  # Report complete data request and metadata request
   if ( $verbose > 2 ) {
-    print STDERR "== Request list ==\n";
+    printf STDERR "== Request list (%d) ==\n", scalar keys %{$datacenter{$dckey}{request}};
     foreach my $req ( sort keys %{$datacenter{$dckey}{request}} ) {
       print STDERR "    $req (metadata: $datacenter{$dckey}{request}->{$req})\n";
     }
+    print STDERR "== End of request list ==\n";
+
+    printf STDERR "== Metadata request list (%d) ==\n", scalar keys %{$datacenter{$dckey}{metarequest}};
+    foreach my $req ( sort keys %{$datacenter{$dckey}{metarequest}} ) {
+      print STDERR "    $req (metadata: $datacenter{$dckey}{metarequest}->{$req})\n";
+    }
+    print STDERR "== End of metadata request list ==\n";
+  }
+
+  # Done with this data center if no requests
+  if (scalar keys %{$datacenter{$dckey}{request}} <= 0 &&
+      scalar keys %{$datacenter{$dckey}{metarequest}} <= 0) {
+    if ( $verbose ) {
+      print STDERR "No requests for data center $dckey\n";
+    }
+
+    next;
   }
 
   # Fetch time series data if output file specified
