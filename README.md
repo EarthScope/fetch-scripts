@@ -7,11 +7,11 @@ with that language support.
 
 **FetchData** (Perl) - Fetch time series and optionally, related metadata, matching SAC Poles and Zeros and matching SEED RESP files. Time series data are returned in miniSEED format, metadata is saved as a simple ASCII list.
 
-**FetchMetadata** (Perl) - Fetch station metadata and output simple ASCII. Optionally, the XML returned by the service can be saved.  Works with any fdsnws-station service.
+**FetchMetadata** (Perl) - Fetch station metadata and output simple text. Optionally, the XML returned by the service can be saved.  Works with any fdsnws-station service.
 
-**FetchEvent** (Perl) - Fetch event parameters and print simple ASCII summary.  Works with any fdsnws-event service.
+**FetchEvent** (Perl) - Fetch event parameters and print simple text summary.  Works with any fdsnws-event service.
 
-**FetchSyn** (Python) - Fetch synthetics seismograms from the IRIS Syngine service.
+**FetchSyn** (Python) - Fetch synthetics seismograms from the [EarthScope Syngine](https://service.iris.edu/irisws/syngine/1/) service.
 
 ## Documentation and examples
 
