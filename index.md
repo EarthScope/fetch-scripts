@@ -1,4 +1,4 @@
-<!-- GitHub Pages root page is README and the github corner -->
+<!-- GitHub Pages root page is README.md and a GitHub Corner -->
 
 {% include_relative README.md %}
 
