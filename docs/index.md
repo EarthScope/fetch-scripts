@@ -9,7 +9,7 @@ with that language support.
 
 **[FetchEvent](FetchEvent)** (Perl) - Fetch event parameters and print simple text summary.  Works with any fdsnws-event service.
 
-**[FetchSyn](FetchSyn)** (Python) - Fetch synthetics seismograms from the [EarthScope Syngine](https://service.iris.edu/irisws/syngine/1/) service.  See (FetchSyn usage)[fetchsyn.md]
+**[FetchSyn](FetchSyn)** (Python) - Fetch synthetics seismograms from the [EarthScope Syngine](https://service.iris.edu/irisws/syngine/1/) service.  See [FetchSyn usage](fetchsyn.md)
 
 ## Quick start
 
