@@ -1,5 +1,4 @@
-The scripts provide convenient access to seismological data via FDSN and other
-web services.
+Convenient access to seismological data via FDSN and other web services.
 
 The scripts are written in Perl and Python and should run on most systems.
 
