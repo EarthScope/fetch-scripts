@@ -57,7 +57,3 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 Copyright (c) 2018 EarthScope Consortium
-
-<!--
-{% include_relative docs/github-corner.html %}
--->
