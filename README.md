@@ -15,4 +15,4 @@ with that language support.
 
 ## Documentation and examples
 
-Further description and example usage can be found [in the Wiki](../../wiki)
+Further description and example usage can be found [in the documentation](https://earthscope.github.io/fetch-scripts)
