@@ -1,7 +1,7 @@
-# Command line scripts for accessing data via FDSN and other web services
+The scripts provide convenient access to seismological data via FDSN and other
+web services.
 
-The scripts are written in Perl and Python and should run on most systems
-with that language support.
+The scripts are written in Perl and Python and should run on most systems.
 
 ## Overview of scripts
 
@@ -9,7 +9,7 @@ with that language support.
 
 **[FetchEvent](FetchEvent)** (Perl) - Fetch event parameters and print simple text summary.  Works with any fdsnws-event service.
 
-**[FetchSyn](FetchSyn)** (Python) - Fetch synthetics seismograms from the [EarthScope Syngine](https://service.iris.edu/irisws/syngine/1/) service.  See [FetchSyn usage](docs/fetchsyn.md)
+**[FetchSyn](FetchSyn)** (Python) - Fetch synthetics seismograms from the [EarthScope Syngine](https://service.iris.edu/irisws/syngine/1/) service.  See [FetchSyn usage](docs/fetchsyn.md).
 
 ## Quick start
 
