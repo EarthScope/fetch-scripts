@@ -7,3 +7,4 @@ plugins:
 relative_links:
   enabled:     true
   collections: false
+remote_theme: EarthScope/theme_ghpages
