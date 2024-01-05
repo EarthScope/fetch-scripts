@@ -18,11 +18,11 @@ The scripts are written in Perl and Python and should run on most systems.
 
 ## Documentation and examples
 
-Further description and example usage can be found [in the tutorial](docs/tutorial.md)
+Further description and example usage can be found [in the tutorial](docs/tutorial)
 
 ## Using the scripts with other data centers
 
-See documentation on [using the scripts with other data centers](docs/other-centers.md)
+See documentation on [using the scripts with other data centers](docs/other-centers)
 
 ## Perl requirements
 
