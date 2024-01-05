@@ -1,3 +1,5 @@
+# fetch-scripts - command line access to seismic data
+
 Convenient access to seismological data via FDSN and other web services.
 
 The scripts are written in Perl and Python and should run on most systems.
@@ -57,3 +59,5 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 Copyright (c) 2018 EarthScope Consortium
+
+{% include_relative docs/github-corner.html %}
