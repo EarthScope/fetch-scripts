@@ -2,7 +2,7 @@ Convenient access to seismological data via FDSN and other web services.
 
 The scripts are written in Perl and Python and should run on most systems.
 
-## Overview of scripts
+## The scripts
 
 **[FetchData](FetchData)** (Perl) - Fetch time series and optionally, related metadata, matching SAC Poles and Zeros and matching SEED RESP files. Time series data are returned in miniSEED format, metadata is saved as a simple ASCII list.
 
