@@ -3,3 +3,4 @@ title: fetch-scripts - command line access to seismic data
 markdown: kramdown
 permalink: pretty
 remote_theme: EarthScope/theme_ghpages
+github_corner_link: https://github.com/EarthScope/fetch-scripts
