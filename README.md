@@ -46,6 +46,8 @@ PS C:\Users\username\Downloads> perl .\FetchData
 
 ## Copyright and License
 
+The fetch-scripts are an [EarthScope](https://www.earthscope.org/) product.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
