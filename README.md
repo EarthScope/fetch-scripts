@@ -22,7 +22,7 @@ Further description and example usage can be found [in the tutorial](docs/tutori
 
 ## Using the scripts with other data centers
 
-See documentation on [using the scripts with other data centers](docs/other-centers)
+See documentation on [using the scripts with other data centers]({{ site.baseurl }}{% link docs/other-centers.md %})
 
 ## Perl requirements
 
