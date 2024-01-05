@@ -1,3 +1,6 @@
 name: EarthScope
 title: fetch-scripts - command line access to seismic data
 markdown: kramdown
+relative_links:
+  enabled:     true
+  collections: false
