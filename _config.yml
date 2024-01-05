@@ -2,4 +2,3 @@ name: EarthScope
 title: fetch-scripts - command line access to seismic data
 markdown: kramdown
 auto: true
-remote_theme: EarthScope/theme_ghpages
