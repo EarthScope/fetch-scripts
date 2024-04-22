@@ -2,7 +2,7 @@
 #
 # FetchEvent
 #
-# Find the most current version at http://service.iris.edu/clients/
+# Find the most current version at https://earthscope.github.io/fetch-scripts/
 #
 # Fetch event parameters from web services.  The default web service
 # is from the International Seismological Centre (ISC), other FDSN web
@@ -277,7 +277,7 @@ my $required =  ( defined $starttime || defined $endtime ||
 
 if ( ! $getoptsret || $usage || ! $required ) {
   print "$scriptname: collect event information ($version)\n";
-  print "http://service.iris.edu/clients/\n\n";
+  print "https://earthscope.github.io/fetch-scripts/\n\n";
   print "Usage: $scriptname [options]\n\n";
   print " Options:\n";
   print " -v                More verbosity, may be specified multiple times (-vv, -vvv)\n";
