@@ -293,7 +293,12 @@
 # 2020.314:
 #  - Add explicit test for no requests after discovery and skip data center if needed.
 #
-#  Author: Chad Trabant, IRIS Data Management Center
+# 2025.126
+#  - Use usleep() instead of nanosleep() to support Strawberry Perl on Windows
+#  - Add ":raw" to output file handles for binary writing under Windows
+#    Changes suggested by menke at ldeo.
+#
+#  Author: Chad Trabant, EarthScope Data Services
 
 use strict;
 use File::Basename;
@@ -303,9 +308,9 @@ use LWP 5.806; # Require minimum version
 use LWP::UserAgent;
 use HTTP::Status qw(status_message);
 use HTTP::Date;
-use Time::HiRes qw(nanosleep);
+use Time::HiRes qw(usleep);
 
-my $version = "2020.314";
+my $version = "2025.126";
 
 my $scriptname = basename($0);
 
@@ -802,7 +807,7 @@ foreach my $dckey ( sort keys %datacenter ) {
     }
     else {
       # Determine output file mode (overwrite or append) and add data center prefix if needed
-      my $outfilemode = ( defined $outfileapp ) ? ">>" : ">";
+      my $outfilemode = ( defined $outfileapp ) ? ">>:raw" : ">:raw";
       my $outfilename = $outfile;
       if ( ! defined $outfileapp && $dckey ) {
         # Add data center identifier, $dckey, to the beginning of the file name
@@ -883,7 +888,7 @@ foreach my $dckey ( sort keys %datacenter ) {
     }
     else {
       # Open metadata file, appending if requested, adding data center prefix if needed
-      my $mode = ( defined $metafileapp ) ? ">>" : ">";
+      my $mode = ( defined $metafileapp ) ? ">>:raw" : ">:raw";
       my $metafilename = $metafile;
       if ( ! defined $metafileapp && $dckey ) {
         # Add data center identifier, $dckey, to the beginning of the file name
@@ -1340,7 +1345,7 @@ sub FetchTimeSeriesData {
     open (OUT, $outfilemode, $outfilename) || die "Cannot open output file '$outfilename': $!\n";
   }
   else {
-    open (OUT, ">&STDOUT") || die "Cannot open output file '$outfilename': $!\n";
+    open (OUT, ">&:raw", \*STDOUT) || die "Cannot open STDOUT: $!\n";
   }
 
   my $count = 0;
@@ -1417,7 +1422,7 @@ sub FetchTimeSeriesData {
     # Impose the minimum request interval, potentially throttling loop
     if (defined $requestfinish && (Time::HiRes::time - $requestfinish) < $minimumrequestinterval) {
       my $remaining = $minimumrequestinterval - (Time::HiRes::time - $requestfinish);
-      nanosleep ($remaining * 1E9) if ( $remaining > 0 );
+      usleep ($remaining * 1E6) if ( $remaining > 0 );
     }
 
     print STDERR "Time series URI: '$uri'\n" if ( $verbose > 1 );
@@ -1545,7 +1550,7 @@ sub FetchSACPZ {
 
     # Generate output file name and open
     my $sacpzfile = "$dcdir/SACPZ.$rnet.$rsta.$rloc.$rchan";
-    if ( ! open (OUT, ">$sacpzfile") ) {
+    if ( ! open (OUT, ">:raw", $sacpzfile) ) {
       print STDERR "Cannot open output file '$sacpzfile': $!\n";
       next;
     }
@@ -1558,7 +1563,7 @@ sub FetchSACPZ {
     # Impose the minimum request interval, potentially throttling loop
     if (defined $requestfinish && (Time::HiRes::time - $requestfinish) < $minimumrequestinterval) {
       my $remaining = $minimumrequestinterval - (Time::HiRes::time - $requestfinish);
-      nanosleep ($remaining * 1E9) if ( $remaining > 0 );
+      usleep ($remaining * 1E6) if ( $remaining > 0 );
     }
 
     print STDERR "SAC-PZ URI: '$uri'\n" if ( $verbose > 1 );
@@ -1652,7 +1657,7 @@ sub FetchRESP {
 
     # Generate output file name and open
     my $respfile = "$dcdir/RESP.$rnet.$rsta.$ploc.$rchan";
-    if ( ! open (OUT, ">$respfile") ) {
+    if ( ! open (OUT, ">:raw", $respfile) ) {
       print STDERR "Cannot open output file '$respfile': $!\n";
       next;
     }
@@ -1665,7 +1670,7 @@ sub FetchRESP {
     # Impose the minimum request interval, potentially throttling loop
     if (defined $requestfinish && (Time::HiRes::time - $requestfinish) < $minimumrequestinterval) {
       my $remaining = $minimumrequestinterval - (Time::HiRes::time - $requestfinish);
-      nanosleep ($remaining * 1E9) if ( $remaining > 0 );
+      usleep ($remaining * 1E6) if ( $remaining > 0 );
     }
 
     print STDERR "RESP URI: '$uri'\n" if ( $verbose > 1 );
@@ -1752,7 +1757,7 @@ sub FetchStationXML {
     $postdata .= "$rnet $rsta $rloc $rchan $rstart $rend\n";
   }
 
-  if ( ! open (OUT, ">$dcsxmlfile") ) {
+  if ( ! open (OUT, ">:raw", $dcsxmlfile) ) {
     print STDERR "Cannot open output file '$dcsxmlfile': $!\n";
     return;
   }
